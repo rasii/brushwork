@@ -188,9 +188,14 @@
 <div class="modal" id="statsModal">
   <div class="sheet">
     <h2>Time split</h2>
+    <label class="field">
+      <span>What counts as painting</span>
+      <input type="range" id="strictRange2" min="0" max="1" step="0.01">
+      <span class="ends"><span>Keep more</span><span id="strictVal2"></span><span>Only clear strokes</span></span>
+    </label>
     <div id="statsBody"></div>
     <p class="hint">Painting is time with the brush at the canvas where the painting visibly changed
-      (set by "What counts as painting"). Palette is hand movement over the palette camera. Talking overlaps the others.</p>
+      (set by the slider above). Palette is hand movement over the palette camera. Talking overlaps the others.</p>
     <div class="sheet-foot"><button class="primary" data-close>Done</button></div>
   </div>
 </div>
