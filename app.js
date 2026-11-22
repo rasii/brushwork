@@ -46,7 +46,11 @@
 
   var toastTimer = 0;
   function toast(msg, ms){
-    var t = $("toast"); t.textContent = msg; t.hidden = false;
+    // over the video when it's showing, otherwise at the top of the page
+    var onVideo = !$("player").hidden && $("imgFull").hidden;
+    var t = $(onVideo ? "toast" : "toastPage");
+    $(onVideo ? "toastPage" : "toast").hidden = true;
+    t.textContent = msg; t.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.hidden = true; }, ms || 1800);
   }
 
@@ -81,6 +85,7 @@
     saveSession(true);
     video.pause();
     if(video.src){ var old = video.src; video.removeAttribute("src"); video.load(); if(old.indexOf("blob:") === 0) URL.revokeObjectURL(old); }
+    BWImages.close();
     state.session = null; state.A = null; state.D = null; state.peek = null;
     $("player").hidden = true; $("library").hidden = false;
     $("backBtn").hidden = true; $("statsBtn").hidden = true; $("settingsBtn").hidden = true;
@@ -181,6 +186,7 @@
     if(!files.length) return;
     var vids = files.filter(function(f){ return /^video\//.test(f.type) || /\.(mp4|mov|m4v)$/i.test(f.name); });
     var jsons = files.filter(function(f){ return /\.json$/i.test(f.name); });
+    var imgs = files.filter(function(f){ return /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name); });
     Promise.all(jsons.map(function(f){ return f.text().then(function(t){ try{ return JSON.parse(t); }catch(e){ return null; } }); }))
       .then(function(list){
         list = list.filter(function(a){ return a && a.app === "brushwork" && a.video; });
@@ -196,6 +202,7 @@
       })
       .then(function(list){
         if(!vids.length){
+          if(imgs.length){ toast("Pick the video together with its images", 2600); return; }
           if(list.length){ toast("Analysis saved — now pick the video", 2600); renderRecent(); }
           else toast("That isn't a video or a Brushwork analysis", 2600);
           return;
@@ -203,6 +210,7 @@
         var f = vids[0];
         var A = list.filter(function(a){ return stemOf(a.video.name).toLowerCase() === stemOf(f.name).toLowerCase(); })[0] || list[0] || null;
         state.prepped = /\(prepped\)/i.test(f.name);
+        state.pendingImages = imgs;
         openPlayer({ source: "file", name: A ? A.video.name : f.name, fileName: f.name }, URL.createObjectURL(f), A);
       });
   });
@@ -227,6 +235,7 @@
           if(sess.source === "file") toast("No analysis for this video — it plays in full", 3500);
         }
         rederive();
+        BWImages.open(sess, state.pendingImages); state.pendingImages = null;
         if(saved && saved.position && saved.position < dur - 5) video.currentTime = saved.position;
         Store.putSession(Object.assign(saved || {}, { key: sess.key, name: sess.name, source: sess.source,
                                                       analysis: sess.source === "file" ? state.A : undefined,
@@ -589,12 +598,39 @@
     c.addEventListener("pointercancel", function(){ down = false; });
   }
   bindTimeline($("timeline"), function(f){ return f * (state.D ? state.D.stats.duration : video.duration || 0); });
-  // the zoom strip keeps its window fixed while you drag on it
+  // The zoom strip is dragged like a tape: it moves with the finger and the playhead stays
+  // put, so dragging left goes forward. A tap without dragging jumps to (or peeks at) that spot.
   (function(){
-    var z = $("zoomline"), win = null;
-    z.addEventListener("pointerdown", function(){ win = zoomWindow(); }, true);
-    bindTimeline(z, function(f){ var w = win || zoomWindow(); return w[0] + f * (w[1] - w[0]); });
-    z.addEventListener("pointerup", function(){ win = null; });
+    var z = $("zoomline"), drag = null;
+    z.addEventListener("pointerdown", function(e){
+      try{ z.setPointerCapture(e.pointerId); }catch(err){}
+      var w = zoomWindow(), r = z.getBoundingClientRect();
+      drag = { id: e.pointerId, x: e.clientX, t0: video.currentTime, span: w[1] - w[0], width: r.width || 1,
+               tap: w[0] + Math.max(0, Math.min(1, (e.clientX - r.left) / (r.width || 1))) * (w[1] - w[0]), moved: false };
+    });
+    z.addEventListener("pointermove", function(e){
+      if(!drag || e.pointerId !== drag.id) return;
+      var dx = e.clientX - drag.x;
+      if(!drag.moved){
+        if(Math.abs(dx) < 6) return;
+        drag.moved = true; state.peek = null; $("peekBar").hidden = true;
+      }
+      var dur = state.D ? state.D.stats.duration : (video.duration || 0);
+      drag.t = Math.max(0, Math.min(dur, drag.t0 - dx / drag.width * drag.span));
+      seekTo(drag.t);
+    });
+    function end(e){
+      if(!drag || e.pointerId !== drag.id) return;
+      var d = drag; drag = null;
+      if(e.type === "pointercancel") return;
+      var t = d.moved ? d.t : d.tap;
+      if(t == null) return;
+      // ending up in a skipped part means "show me this bit"
+      if(state.mode !== "all" && gapAround(t)) startPeek(t);
+      else { if(!d.moved){ state.peek = null; $("peekBar").hidden = true; } seekTo(t); }
+    }
+    z.addEventListener("pointerup", end);
+    z.addEventListener("pointercancel", end);
   })();
 
   function resize(){ drawBase(); }
@@ -690,7 +726,7 @@
   // ------------------------------------------------------------------ hiding the controls
   // The video takes the whole window; the controls float over its bottom edge and fade out
   // after a few seconds. Moving the mouse to, or tapping, the bottom edge (or a key) brings them back.
-  var ui = { timer: null, overDock: false };
+  var ui = { timer: null, overDock: false, waitLeave: false };
   function immersive(){ return document.body.classList.contains("immersive"); }
   function setImmersive(on){
     document.body.classList.toggle("immersive", on);
@@ -700,7 +736,13 @@
     $("hideIcon").innerHTML = on ? '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m8 15 4-4 4 4"/>'
                                  : '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m8 11 4 4 4-4"/>';
     Store.set("immersive", on);
-    showUI();
+    if(on){
+      // hide straight away; the pointer is still on the hide button at the bottom edge, so
+      // don't bring the controls back until it has left that area and returned
+      clearTimeout(ui.timer);
+      ui.overDock = false; ui.waitLeave = true;
+      document.body.classList.add("ui-hidden");
+    } else showUI();
     setTimeout(resize, 50);
   }
   function showUI(){
@@ -725,7 +767,8 @@
     document.body.classList.remove("no-cursor");
     clearTimeout(cursorTimer);
     cursorTimer = setTimeout(function(){ if(document.body.classList.contains("ui-hidden")) document.body.classList.add("no-cursor"); }, 2000);
-    if(nearBottom(e.clientY)) showUI();
+    if(!nearBottom(e.clientY)) ui.waitLeave = false;
+    else if(!ui.waitLeave) showUI();
   });
   $("dock").addEventListener("pointerenter", function(e){ if(e.pointerType === "mouse") ui.overDock = true; });
   $("dock").addEventListener("pointerleave", function(){ ui.overDock = false; });
@@ -843,6 +886,7 @@
 
   document.addEventListener("keydown", function(e){
     if($("player").hidden || e.target.tagName === "INPUT") return;
+    if(BWImages.key(e)) return;
     if(document.querySelector(".modal.show")){ if(e.key === "Escape") document.querySelector(".modal.show").classList.remove("show"); return; }
     var k = e.key;
     if(immersive() && k !== " " && k !== "h" && k !== "H") showUI();
@@ -855,6 +899,9 @@
     else if(k === "w" || k === "W") peekPrevious();
     else if(k === "Escape"){ if(state.peek) stopPeek(); else if(document.body.classList.contains("fs")) toggleFull(); }
     else if(k === "c" || k === "C") setImmersive(!immersive());
+    else if(k === "i" || k === "I") BWImages.toggleWindow();
+    else if(k === "o" || k === "O") BWImages.openFull();
+    else if(k === "g" || k === "G") BWImages.grab();
     else if(k === "<" || (k === "," && e.shiftKey)) stepSpeed(-1);
     else if(k === ">" || (k === "." && e.shiftKey)) stepSpeed(1);
     else if((k === "h" || k === "H") && !e.repeat && !hold.active){ hold.key = true; startHold(); }
@@ -866,7 +913,11 @@
   document.addEventListener("visibilitychange", function(){ if(document.hidden) saveSession(true); });
 
   // ------------------------------------------------------------------ start
+  BWImages.init({ video: video, toast: toast, fmt: fmt, stemOf: stemOf, helperURL: helperURL, fetchJSON: fetchJSON });
   Store.get("immersive").then(function(on){ if(on) setImmersive(true); });
+  Store.onblocked = function(){
+    toast("Another Brushwork tab has an older version open. Close the other Brushwork tabs, then reload this one.", 9000);
+  };
   Promise.all([Store.get("settings"), Store.get("mode"), findHelper()]).then(function(r){
     if(r[0]) state.settings = Object.assign({}, BW.DEFAULTS, r[0]);
     syncSpeedUI();

@@ -43,9 +43,9 @@
 <main id="library">
   <section class="open-box">
     <button class="primary" id="openBtn">Open video…</button>
-    <p class="hint" id="openHint">Pick a prepped video and its <b>.brushwork.json</b> together (both from the
+    <p class="hint" id="openHint">Pick a prepped video, its <b>.brushwork.json</b> and any images together (all from the
       <b>brushwork</b> folder next to the original). Nothing leaves this device.</p>
-    <input type="file" id="fileInput" multiple accept="video/*,.json,application/json,.mp4,.mov,.m4v" hidden>
+    <input type="file" id="fileInput" multiple accept="video/*,image/*,.json,application/json,.mp4,.mov,.m4v,.jpg,.jpeg,.png" hidden>
   </section>
 
   <section id="helperSection" hidden>
@@ -69,7 +69,7 @@
 <!-- ============ player ============ -->
 <main id="player" hidden>
   <div class="stage" id="stage">
-    <video id="video" playsinline webkit-playsinline preload="auto"></video>
+    <video id="video" playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
     <div class="toast" id="toast" hidden></div>
     <div class="peek" id="peekBar" hidden>
       <span id="peekText">Watching a part that's normally skipped</span>
@@ -78,6 +78,24 @@
     <div class="status" id="statusBar" hidden></div>
     <div class="holdbadge" id="holdBadge" hidden></div>
     <div class="seekflash" id="seekFlash" hidden></div>
+    <div class="imgwin" id="imgWin" hidden>
+      <div class="imgwin-bar" id="imgWinBar">
+        <button class="icon-btn xs" id="imgPrev" title="Previous image" aria-label="Previous image"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+        <span class="imgwin-name" id="imgName">Images</span>
+        <button class="icon-btn xs" id="imgNext" title="Next image" aria-label="Next image"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+        <button class="icon-btn xs" id="imgFit" title="Fit the whole image" aria-label="Fit the whole image"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg></button>
+        <button class="icon-btn xs" id="imgAdd" title="Add images from this device" aria-label="Add images"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+        <button class="icon-btn xs" id="imgGrab" title="Save this video frame as an image (G)" aria-label="Save this frame"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg></button>
+        <button class="icon-btn xs" id="imgExpand" title="Full screen (O)" aria-label="Show full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        <button class="icon-btn xs" id="imgClose" title="Close (I)" aria-label="Close the image window"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="zv" id="imgWinView"></div>
+      <div class="imgwin-empty" id="imgWinEmpty" hidden>
+        <p>No images for this video yet.</p>
+        <p><button class="text-btn" id="imgEmptyAdd">Add images…</button> <button class="text-btn" id="imgEmptyGrab">Save this frame</button></p>
+      </div>
+      <div class="imgwin-resize" id="imgWinResize" title="Drag to resize"></div>
+    </div>
   </div>
 
   <div class="dock" id="dock">
@@ -107,6 +125,8 @@
         <svg viewBox="0 0 24 24"><path d="M18 5v14M6 6l8 6-8 6z"/></svg></button>
       <button class="icon-btn" id="skippedBtn" title="Watch the part skipped just before this (W)" aria-label="Watch the skipped part">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/></svg></button>
+      <button class="icon-btn" id="imgBtn" title="Images (I)" aria-label="Images">
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 17-5-5-8 7"/></svg></button>
       <span class="time" id="timeText">0:00 / 0:00</span>
       <span class="speed-group">
         <button class="icon-btn sm" id="slowerBtn" title="Slower (&lt;)" aria-label="Slower">
@@ -200,6 +220,21 @@
     <div class="sheet-foot"><button class="primary" data-close>Done</button></div>
   </div>
 </div>
+<!-- ============ full-screen image ============ -->
+<div class="imgfull" id="imgFull" hidden>
+  <div class="zv" id="imgFullView"></div>
+  <div class="imgfull-top">
+    <span class="imgfull-name" id="imgFullName"></span>
+    <button class="text-btn" id="imgFullRemove" hidden>Remove</button>
+    <button class="text-btn" id="imgFullWindow">Show in window</button>
+    <button class="icon-btn" id="imgFullClose" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <button class="icon-btn imgfull-nav prev" id="imgFullPrev" aria-label="Previous image"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+  <button class="icon-btn imgfull-nav next" id="imgFullNext" aria-label="Next image"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+  <div class="imgfull-chips" id="imgFullChips"></div>
+</div>
+<div class="toast page" id="toastPage" hidden></div>
+<input type="file" id="imgInput" multiple accept="image/*,.jpg,.jpeg,.png,.heic" hidden>
 <!-- ============ keyboard help ============ -->
 <div class="modal" id="keysModal">
   <div class="sheet">
@@ -213,6 +248,8 @@
       <tr><td>Esc</td><td>Back to skipping</td></tr>
       <tr><td>&lt; / &gt;</td><td>Slower / faster</td></tr>
       <tr><td>Double-click</td><td>On the left / right of the video: back / forward 10 s</td></tr>
+      <tr><td>I · O</td><td>Image window · Image full screen</td></tr>
+      <tr><td>G</td><td>Save this frame as an image</td></tr>
       <tr><td>C</td><td>Hide / show the controls</td></tr>
       <tr><td>Hold H</td><td>Play at the hold speed while held</td></tr>
       <tr><td>M · F</td><td>Mute · Full screen</td></tr>
@@ -224,6 +261,7 @@
 <script src="version.js"></script>
 <script src="store.js"></script>
 <script src="analysis.js"></script>
+<script src="images.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
-// Small IndexedDB wrapper: sessions (analysis + where you were) and settings stay on
-// the device. Falls back to memory if IndexedDB isn't available (private browsing).
+// Small IndexedDB wrapper: sessions (analysis + where you were), images and settings stay
+// on the device. Falls back to memory if IndexedDB isn't available (private browsing).
 (function(root){
   "use strict";
-  var DB = "brushwork", VER = 1, mem = { sessions: {}, kv: {} }, dbp = null;
+  var DB = "brushwork", VER = 2, mem = { sessions: {}, kv: {}, images: {} }, dbp = null;
 
   function open(){
     if(dbp) return dbp;
@@ -13,9 +13,22 @@
           var db = req.result;
           if(!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "key" });
           if(!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+          // images picked on this device or grabbed from a video: { id, name, blob }, shared by
+          // every session that lists the id (a course's sessions share its images)
+          if(!db.objectStoreNames.contains("images")) db.createObjectStore("images", { keyPath: "id" });
         };
-        req.onsuccess = function(){ resolve(req.result); };
+        req.onsuccess = function(){
+          var db = req.result;
+          // let a newer version of the app (in another tab) upgrade the database
+          db.onversionchange = function(){ db.close(); dbp = null; };
+          resolve(db);
+        };
         req.onerror = function(){ resolve(null); };
+        // another tab still has the old version open: say so, and don't hang meanwhile
+        req.onblocked = function(){
+          if(root.Store && root.Store.onblocked) root.Store.onblocked();
+          setTimeout(function(){ resolve(null); }, 1500);
+        };
       }catch(e){ resolve(null); }
     });
     return dbp;
@@ -52,6 +65,18 @@
       return tx("sessions", "readonly", function(s){ return s ? s.getAll() : null; })
         .then(function(v){ return (v || Object.keys(mem.sessions).map(function(k){ return mem.sessions[k]; }))
           .sort(function(a, b){ return (b.updated || 0) - (a.updated || 0); }); });
+    },
+    getImage: function(id){
+      return tx("images", "readonly", function(s){ return s ? s.get(id) : null; })
+        .then(function(v){ return v || mem.images[id] || null; });
+    },
+    putImage: function(obj){
+      mem.images[obj.id] = obj;
+      return tx("images", "readwrite", function(s){ return s ? s.put(obj) : null; }).catch(function(){});
+    },
+    deleteImage: function(id){
+      delete mem.images[id];
+      return tx("images", "readwrite", function(s){ return s ? s.delete(id) : null; }).catch(function(){});
     },
     get: function(k){
       return tx("kv", "readonly", function(s){ return s ? s.get(k) : null; })

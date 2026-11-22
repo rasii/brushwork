@@ -3,7 +3,7 @@
 // from the PC helper). A new version (a new version.js) is fetched whole and takes over.
 importScripts("version.js");
 var CACHE = "brushwork-" + self.APP_VERSION;
-var SHELL = ["./", "index.html", "app.css", "app.js", "analysis.js", "store.js", "version.js",
+var SHELL = ["./", "index.html", "app.css", "app.js", "analysis.js", "store.js", "images.js", "version.js",
              "manifest.webmanifest", "apple-touch-icon.png"];
 
 self.addEventListener("install", function(e){

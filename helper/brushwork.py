@@ -9,7 +9,7 @@ For each video it writes, in a "brushwork" folder next to the video:
 
 Needs ffmpeg/ffprobe on PATH and numpy.
 """
-import base64, hashlib, json, math, os, re, subprocess, sys, threading, time, traceback
+import base64, hashlib, json, math, os, re, shutil, subprocess, sys, threading, time, traceback
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -386,9 +386,62 @@ def analysis_complete(video):
         return False
 
 
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+
+def images_for(video):
+    """The images in the video's folder (reference, finished painting, progress shots): the
+    ones named after this video first ("Session 1 ...jpg"), then the rest of the course's."""
+    d, s = os.path.dirname(video), stem(video).lower()
+    try:
+        names = [f for f in os.listdir(d) if f.lower().endswith(IMG_EXT) and os.path.isfile(os.path.join(d, f))]
+    except OSError:
+        return []
+    def mine(f):
+        return f.lower().startswith(s + " ") or os.path.splitext(f)[0].lower() == s
+    names.sort(key=lambda f: (not mine(f), f.lower()))
+    return [{"name": f, "session": mine(f)} for f in names]
+
+
+IPAD_IMG_MAX = 4096   # long side of the copies in the brushwork folder; the originals can be 24 MP
+
+
+def copy_images(video, log=print):
+    """Put the course's images in the brushwork folder too, so that one folder has everything
+    the iPad needs. Big photos are scaled down to IPAD_IMG_MAX on the long side."""
+    import cv2
+    sd = side_dir(video)
+    os.makedirs(sd, exist_ok=True)
+    n = 0
+    for im in images_for(video):
+        src, dst = os.path.join(os.path.dirname(video), im["name"]), os.path.join(sd, im["name"])
+        if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+            continue
+        img = cv2.imdecode(np.fromfile(src, dtype=np.uint8), cv2.IMREAD_COLOR)   # applies EXIF rotation
+        ext = os.path.splitext(src)[1].lower()
+        if img is None or ext == ".gif" or max(img.shape[:2]) <= IPAD_IMG_MAX:
+            shutil.copy2(src, dst)
+        else:
+            k = IPAD_IMG_MAX / max(img.shape[:2])
+            img = cv2.resize(img, (round(img.shape[1] * k), round(img.shape[0] * k)), interpolation=cv2.INTER_AREA)
+            params = [cv2.IMWRITE_JPEG_QUALITY, 90] if ext in (".jpg", ".jpeg") else []
+            ok, buf = cv2.imencode(ext if ext != ".jpeg" else ".jpg", img, params)
+            if not ok:
+                shutil.copy2(src, dst)
+            else:
+                buf.tofile(dst)
+        n += 1
+    if n:
+        log(f"copied {n} image(s) to {sd}")
+
+
 def process(video, job=None, log=print):
     """Analysis and prep run side by side."""
     job = job or Job(video)
+    try:
+        copy_images(video, log)
+    except Exception as e:
+        log(f"couldn't copy the images: {e}")
     threads = []
     partial_prep = prepped_path(video)[:-4] + ".partial.mp4"
     if not analysis_complete(video) and busy_elsewhere(analysis_path(video)):
@@ -507,7 +560,8 @@ class Library:
 LIB = Library()
 MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
         ".png": "image/png", ".webmanifest": "application/manifest+json", ".mp4": "video/mp4",
-        ".svg": "image/svg+xml", ".md": "text/plain"}
+        ".svg": "image/svg+xml", ".md": "text/plain", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -553,7 +607,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"app": "brushwork-helper", "version": VERSION})
             if u.path == "/api/library":
                 return self.send_json(LIB.scan())
-            if u.path in ("/api/status", "/api/analysis", "/video"):
+            if u.path in ("/api/status", "/api/analysis", "/video", "/api/images", "/image"):
                 i = q.get("id", [""])[0]
                 if i not in LIB.paths:
                     LIB.scan()
@@ -562,6 +616,14 @@ class Handler(BaseHTTPRequestHandler):
                 p = LIB.paths[i]
                 if u.path == "/api/status":
                     return self.send_json(LIB.status(i))
+                if u.path == "/api/images":
+                    return self.send_json(images_for(p))
+                if u.path == "/image":
+                    n = q.get("n", [""])[0]
+                    if n not in [im["name"] for im in images_for(p)]:
+                        return self.send_json({"error": "no such image"}, 404)
+                    f = os.path.join(os.path.dirname(p), n)
+                    return self.send_file(f, MIME.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
                 if u.path == "/api/analysis":
                     a = analysis_path(p)
                     if not os.path.exists(a):

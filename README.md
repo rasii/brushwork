@@ -26,6 +26,9 @@ whole window. The controls float over its bottom edge and fade out after a few s
 playing, and stay hidden when you pause. Move the mouse to the bottom edge, or tap or click
 there, to bring them back (a key does too).
 
+**Zoomed strip:** the upper timeline shows about six minutes around the playhead. Drag it
+like a tape (left goes forward, right goes back) to scrub; tap it to jump to that spot.
+
 **Jumping:** double-tap (or double-click) the right side of the video to jump forward 10 s,
 the left side to jump back; each further quick tap adds another 10 s.
 
@@ -35,6 +38,16 @@ everything that plays (the voice keeps its pitch; fast-forwarded gaps keep their
 speed). **Touch and hold the video** to play at your hold speed (0.25× to 8×, 2× by
 default) until you let go. That works while paused too, and on the PC holding **H** does
 the same. **<** and **>** step the speed down and up.
+
+**Images:** the picture button (or **I**) opens a floating window with the reference photo,
+the finished painting and progress shots. Drag its title bar to move it, its corner to
+resize it; scroll or pinch to zoom, drag to look around, double-tap to zoom in or back
+out. It remembers where it was and how it was zoomed for each video. The arrows switch
+images; the expand button (or **O**) shows one full screen and pauses the video until you
+close it. The camera button (or **G**) saves the current video frame as an image, and the
+**+** adds images from the device. On the PC every image in the video's folder is listed,
+that session's own ("Session 1 …") first; processing a video also copies them, scaled to at
+most 4096 px, into its `brushwork` folder for the iPad.
 
 Made for an iPad saved to the home screen, like Comp-Art; works in any modern browser.
 Videos never leave the device.
@@ -74,9 +87,9 @@ Uses the NVIDIA encoder when there is one, otherwise x264.
 
 ## On the iPad
 
-1. Copy the video's `brushwork` folder (the prepped video + its `.brushwork.json`) to the
+1. Copy the video's `brushwork` folder (the prepped video, its `.brushwork.json` and the images) to the
    iPad, e.g. into Files › On My iPad.
-2. Open Brushwork from the home screen, tap **Open video…**, and pick **both** files.
+2. Open Brushwork from the home screen, tap **Open video…**, and pick the video, its `.brushwork.json` and the images you want, all together.
 3. The analysis is kept in the app. Next time only the video needs picking (Safari won't
    let a web app keep a link to a video in Files) — tap the session under **Recent**.
 
@@ -106,7 +119,8 @@ strict "painting" is takes effect at once without re-analysing.
 | `app.css` | Styles (Comp-Art's dark palette) |
 | `app.js` | The app: library, opening files or helper videos, playback with skipping / fast-forward / peeking, timelines, settings |
 | `analysis.js` | Turns an analysis file into per-second categories, talking, and each mode's list of kept time ranges |
-| `store.js` | IndexedDB: saved analyses, where you were in each video, settings |
+| `images.js` | Reference / finished images: the zoomable floating window and full-screen view |
+| `store.js` | IndexedDB: saved analyses and images, where you were in each video, settings |
 | `sw.js`, `version.js` | Offline copy of the app; bump `version.js` on every release |
 | `manifest.webmanifest`, `apple-touch-icon.png` | Home-screen install |
 | `helper/brushwork.py` | The PC helper: analysis, prep, and a small local server (port 8777) for the viewer |
