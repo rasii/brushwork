@@ -776,10 +776,41 @@
 
   // ------------------------------------------------------------------ controls
   $("playBtn").addEventListener("click", togglePlay);
-  video.addEventListener("click", function(){
-    if(hold.eatClick){ hold.eatClick = false; return; }
+  // Taps on the video: a single tap plays / pauses. A double tap on the left or right side
+  // jumps back / forward 10 s, and each further quick tap on that side adds another 10 s.
+  // Taps on the sides wait a moment to see whether a second tap follows; the middle doesn't.
+  var tap = { timer: null, last: 0, side: null, streak: false, total: 0, flashTimer: null };
+  function singleTap(){
     if(immersive() && hold.touch && document.body.classList.contains("ui-hidden")){ showUI(); return; }   // on touch, the first tap just shows the controls
     togglePlay();
+  }
+  function tapSeek(side){
+    if(side === "left"){ state.peek = null; $("peekBar").hidden = true; seekTo(video.currentTime - 10); }
+    else seekTo(video.currentTime + 10);
+    tap.total += 10;
+    var f = $("seekFlash");
+    f.className = "seekflash " + side;
+    f.textContent = side === "left" ? "« " + tap.total + " s" : tap.total + " s »";
+    f.hidden = false;
+    clearTimeout(tap.flashTimer);
+    tap.flashTimer = setTimeout(function(){ f.hidden = true; }, 700);
+  }
+  video.addEventListener("click", function(e){
+    if(hold.eatClick){ hold.eatClick = false; return; }
+    var r = video.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+    var side = x < 0.35 ? "left" : x > 0.65 ? "right" : "mid";
+    var now = Date.now(), quick = now - tap.last < (tap.streak ? 650 : 300) && side === tap.side;
+    tap.last = now;
+    if(side !== "mid" && quick && (tap.streak || tap.timer)){
+      clearTimeout(tap.timer); tap.timer = null;
+      if(!tap.streak){ tap.streak = true; tap.total = 0; }
+      tapSeek(side);
+      return;
+    }
+    clearTimeout(tap.timer); tap.timer = null;
+    tap.side = side; tap.streak = false;
+    if(side === "mid") singleTap();
+    else tap.timer = setTimeout(function(){ tap.timer = null; singleTap(); }, 300);
   });
   $("backSecBtn").addEventListener("click", function(){ state.peek = null; $("peekBar").hidden = true; seekTo(video.currentTime - 10); });
   $("fwdSecBtn").addEventListener("click", function(){ seekTo(video.currentTime + 10); });

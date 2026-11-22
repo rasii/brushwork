@@ -25,6 +25,9 @@ divides between painting, palette and talking. Settings set how strict "painting
 whole window. The controls float over its bottom edge and fade out after a few seconds of
 playing; move the mouse to the bottom edge, tap the video or press a key to bring them back.
 
+**Jumping:** double-tap (or double-click) the right side of the video to jump forward 10 s,
+the left side to jump back; each further quick tap adds another 10 s.
+
 **Speed:** the − and + buttons either side of the speed step it down and up; tapping the
 speed itself opens the full list. Playback speed runs from 0.25× to 3×, for
 everything that plays (the voice keeps its pitch; fast-forwarded gaps keep their own
