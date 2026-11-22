@@ -689,7 +689,7 @@
 
   // ------------------------------------------------------------------ hiding the controls
   // The video takes the whole window; the controls float over its bottom edge and fade out
-  // after a few seconds of playing. Mouse movement, a tap on the video or a key brings them back.
+  // after a few seconds. Moving the mouse to, or tapping, the bottom edge (or a key) brings them back.
   var ui = { timer: null, overDock: false };
   function immersive(){ return document.body.classList.contains("immersive"); }
   function setImmersive(on){
@@ -711,7 +711,7 @@
   }
   function hideUI(){
     if(!immersive()) return;
-    if(video.paused || ui.overDock || document.querySelector(".modal.show")){
+    if(ui.overDock || document.querySelector(".modal.show")){
       ui.timer = setTimeout(hideUI, 1000); return;
     }
     document.body.classList.add("ui-hidden");
@@ -725,13 +725,11 @@
     document.body.classList.remove("no-cursor");
     clearTimeout(cursorTimer);
     cursorTimer = setTimeout(function(){ if(document.body.classList.contains("ui-hidden")) document.body.classList.add("no-cursor"); }, 2000);
-    var r = $("player").getBoundingClientRect();
-    if(e.clientY > r.bottom - ($("dock").offsetHeight + 40)) showUI();
+    if(nearBottom(e.clientY)) showUI();
   });
   $("dock").addEventListener("pointerenter", function(e){ if(e.pointerType === "mouse") ui.overDock = true; });
   $("dock").addEventListener("pointerleave", function(){ ui.overDock = false; });
   $("dock").addEventListener("pointerdown", showUI);
-  video.addEventListener("pause", showUI);
   document.querySelectorAll("#speedSeg button").forEach(function(b){
     b.addEventListener("click", function(){ setSpeed(+b.dataset.speed); });
   });
@@ -780,9 +778,10 @@
   // jumps back / forward 10 s, and each further quick tap on that side adds another 10 s.
   // Taps on the sides wait a moment to see whether a second tap follows; the middle doesn't.
   var tap = { timer: null, last: 0, side: null, streak: false, total: 0, flashTimer: null };
-  function singleTap(){
-    if(immersive() && hold.touch && document.body.classList.contains("ui-hidden")){ showUI(); return; }   // on touch, the first tap just shows the controls
-    togglePlay();
+  function singleTap(){ togglePlay(); }
+  function nearBottom(y){
+    var r = $("player").getBoundingClientRect();
+    return y > r.bottom - ($("dock").offsetHeight + 40);
   }
   function tapSeek(side){
     if(side === "left"){ state.peek = null; $("peekBar").hidden = true; seekTo(video.currentTime - 10); }
@@ -797,6 +796,10 @@
   }
   video.addEventListener("click", function(e){
     if(hold.eatClick){ hold.eatClick = false; return; }
+    // controls hidden: a tap or click near the bottom edge brings them back, anywhere else is a normal tap
+    if(immersive() && document.body.classList.contains("ui-hidden") && nearBottom(e.clientY)){
+      clearTimeout(tap.timer); tap.timer = null; tap.streak = false; showUI(); return;
+    }
     var r = video.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
     var side = x < 0.35 ? "left" : x > 0.65 ? "right" : "mid";
     var now = Date.now(), quick = now - tap.last < (tap.streak ? 650 : 300) && side === tap.side;

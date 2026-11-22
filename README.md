@@ -23,7 +23,8 @@ divides between painting, palette and talking. Settings set how strict "painting
 
 **Hiding the controls:** the button next to full screen (or **C**) gives the video the
 whole window. The controls float over its bottom edge and fade out after a few seconds of
-playing; move the mouse to the bottom edge, tap the video or press a key to bring them back.
+playing, and stay hidden when you pause. Move the mouse to the bottom edge, or tap or click
+there, to bring them back (a key does too).
 
 **Jumping:** double-tap (or double-click) the right side of the video to jump forward 10 s,
 the left side to jump back; each further quick tap adds another 10 s.
