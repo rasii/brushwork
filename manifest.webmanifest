@@ -1,0 +1,11 @@
+{
+  "name": "Brushwork",
+  "short_name": "Brushwork",
+  "description": "Watch painting-demo videos with the palette mixing and quiet stretches skipped.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#181613",
+  "theme_color": "#181613",
+  "icons": [{ "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }]
+}
