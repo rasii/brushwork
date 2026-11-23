@@ -410,8 +410,7 @@
     state.peek = g;
     $("peekBar").hidden = false;
     $("peekText").textContent = "Watching a part that's normally skipped";
-    seekTo(t);
-    if(video.paused) video.play().catch(function(){});
+    seekTo(t);     // stays paused if it was: only the play button or the video starts playback
     return true;
   }
   function stopPeek(){
@@ -430,7 +429,6 @@
     if(!g || g[1] - g[0] < 0.5) return toast("Nothing skipped just before this");
     state.peek = g; $("peekBar").hidden = false;
     seekTo(g[0]);
-    if(video.paused) video.play().catch(function(){});
   }
 
   function setMode(m){

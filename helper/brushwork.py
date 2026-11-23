@@ -15,13 +15,20 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 import numpy as np
 
-VERSION = 1
+VERSION = 2                                           # 2: stretches carry 5-second pieces
 PORT = 8777
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)                       # the viewer's files, served at /
 CONFIG = os.path.join(HERE, "config.json")
 STEP = 0.5                                            # seconds per sample
 W, H = 384, 216                                       # analysis frame size
+PIECE = 10                                            # samples per piece of a stretch (5 s)
+HALF = 6                                              # a clean canvas is the median of +-HALF samples
+FINE = 2                                              # pieces are judged at FINE x the analysis size
+SHIFT = int(os.environ.get("BW_SHIFT", 1))           # a pixel must differ from all within SHIFT px...
+DIFF = int(os.environ.get("BW_DIFF", 12))            # ...by more than DIFF grey levels to count as paint
+LATER = 60                                            # ...and checked again this many samples later (30 s)
+                                                      # (a highlight in an eye is a pixel or two at 384x216)
 NOWIN = 0x08000000 if os.name == "nt" else 0          # no console window for child processes
 
 
@@ -247,28 +254,101 @@ def analyze(video, job=None, log=print):
 
     job.analyze["message"] = "watching"
     p = subprocess.Popen(["ffmpeg", "-v", "error", "-hwaccel", "auto", "-i", video, "-an",
-                          "-vf", f"fps={1 / STEP},scale={W}:{H}:flags=area,format=gray",
-                          "-f", "rawvideo", "-"], stdout=subprocess.PIPE, bufsize=W * H * 16,
+                          "-vf", f"fps={1 / STEP},scale={W * FINE}:{H * FINE}:flags=area,format=gray",
+                          "-f", "rawvideo", "-"], stdout=subprocess.PIPE, bufsize=W * H * FINE * FINE * 16,
                          creationflags=NOWIN)
     C_ACT, GAP = 0.004, int(3.0 / STEP)
     S = res["samples"]
-    prev, ring, open_st = None, [], None     # open_st: [start_index, last_active_index, before_frame]
+    # open_st: [start_index, last_active_index, before_frame, clean canvas before, [(index, clean canvas)]]
+    prev, ring, fring, open_st = None, [], [], None
     inset, cand, cand_n, misses = None, None, 0, 0
     canvas, pal, border = make_masks(main, None)
     i, last_write = 0, time.time()
+    pending, quiet_n = [], 0     # stretches waiting for their check 30 s later; samples without a stretch
+    history = []                 # (index, clean canvas) from quiet moments, the last couple of minutes
 
-    def close(st, after):
-        s_i, last_i, before = st
+    def clean(frames):
+        """The canvas with a moving hand mostly gone: the per-pixel median of a few frames."""
+        return np.median(np.stack(frames), axis=0).astype(np.int16)
+
+    def differs(X, Y, cmask, R=SHIFT, T=DIFF):
+        """Where X differs from Y by more than T even allowing Y to shift up to R pixels
+        (the camera shakes when the panel is touched, and the board's grain is full of edges)
+        and allowing for an overall brightness change."""
+        X = X - int(np.median((X - Y)[cmask]))
+        out = np.ones(X.shape, bool)
+        for dy in range(-R, R + 1):
+            for dx in range(-R, R + 1):
+                out &= np.abs(X - np.roll(np.roll(Y, dy, axis=0), dx, axis=1)) > T
+        return out
+
+    def close(st, after, after_clean=None):
+        s_i, last_i, before, before_clean, bounds, earlier = st
         change = -1.0
         if after is not None and before is not None:
             change = float((np.abs(after - before)[canvas] > 18).mean())
-        res["stretches"].append([round((s_i - 1) * STEP, 2), round(last_i * STEP, 2), round(change, 5)])
+        rec = [round((s_i - 1) * STEP, 2), round(last_i * STEP, 2), round(change, 5)]
+        res["stretches"].append(rec)
+        if after_clean is not None and before_clean is not None:
+            judge(rec, before_clean, bounds, after_clean, last_i, earlier)
+            remember(after_clean, i)
+        elif after_clean is None:
+            settle_all()     # the camera or the layout moved: a later look would compare different views
+            history.clear()
+
+    def judge(rec, A0, bounds, F, last_i, E):
+        """Split a stretch into 5-second pieces and find the paint each one added.
+
+        Everything is measured against the clean canvas just before the stretch (A0). A pixel
+        counts as paint when it differs from A0 just after the stretch (F), still differs 30 s
+        later (L, see settle), and also differs from a canvas at least 30 s *before* the
+        stretch (E) -- so a hand that passes over the painting while pointing, that rests
+        there just after the stretch, or that was resting there just before it, doesn't count.
+        Each such pixel belongs to the piece in which it first changed."""
+        cmask = np.repeat(np.repeat(canvas, FINE, axis=0), FINE, axis=1)
+        pts = [(rec[0], A0)] + [(b * STEP, c) for b, c in bounds if b * STEP < rec[1] - 1.0] + [(rec[1], F)]
+        parts, seen = [], np.zeros(A0.shape, bool)
+        for (t0, A), (t1, B) in zip(pts, pts[1:]):
+            now = differs(B, A0, cmask)
+            parts.append((t0, t1, now & ~seen))
+            seen |= now
+        pending.append((rec, cmask, parts, last_i, A0, F, E))
+
+    def settle(item, L):
+        rec, cmask, parts, _, A0, F, E = item
+        if L is None:
+            L = F
+        lasting = differs(F, A0, cmask) & differs(L, A0, cmask)
+        if E is not None:
+            lasting &= differs(L, E, cmask)
+        rec.append([[round(t0, 2), round(t1, 2), round(float((m & lasting)[cmask].mean()), 5)]
+                    for t0, t1, m in parts])
+
+    def remember(C, at_i):
+        """A clean canvas from a quiet moment: the second look for stretches 30 s or more
+        before, and the earlier canvas for stretches starting 30 s or more after."""
+        history.append((at_i, C))
+        while len(history) > 2 and history[1][0] < at_i - 4 * LATER:
+            history.pop(0)
+        for item in [x for x in pending if x[3] + LATER <= at_i]:
+            settle(item, C); pending.remove(item)
+
+    def earlier_canvas(at_i):
+        old = [c for k, c in history if k <= at_i - LATER]
+        return old[-1] if old else (history[0][1] if history else None)
+
+    def settle_all(L=None):
+        for item in pending:
+            settle(item, L)
+        pending.clear()
 
     while True:
-        buf = p.stdout.read(W * H)
-        if len(buf) < W * H:
+        buf = p.stdout.read(W * H * FINE * FINE)
+        if len(buf) < W * H * FINE * FINE:
             break
-        fr = np.frombuffer(buf, np.uint8).reshape(H, W).astype(np.int16)
+        big = np.frombuffer(buf, np.uint8).reshape(H * FINE, W * FINE)
+        fr = big.reshape(H, FINE, W, FINE).mean(axis=(1, 3)).round().astype(np.int16)
+        fring.append(big); fring = fring[-(2 * HALF + 1):]
 
         # track the palette inset: look every 2 s; switch after 5 matching sightings in a row,
         # drop it after a minute without seeing it
@@ -313,11 +393,20 @@ def analyze(video, job=None, log=print):
             close(open_st, None); open_st = None
         if active:
             if open_st is None:
-                open_st = [i, i, ring[-2] if len(ring) >= 2 else None]
+                open_st = [i, i, ring[-2] if len(ring) >= 2 else None,
+                           clean(fring[-5:-1]) if len(fring) >= 2 else None, [], earlier_canvas(i)]
             else:
                 open_st[1] = i
         elif open_st and i - open_st[1] > GAP:
-            close(open_st, fr); open_st = None
+            # the GAP + 1 quiet frames since the last movement give the clean canvas after
+            close(open_st, fr, clean(fring[-(GAP + 1):])); open_st = None
+        # a clean canvas every PIECE samples through the stretch (+-HALF samples around each point)
+        if open_st and i - HALF > open_st[0] and (i - HALF - open_st[0]) % PIECE == 0:
+            open_st[4].append((i - HALF, clean(fring)))
+        # long quiet spells give second looks too
+        quiet_n = 0 if open_st else quiet_n + 1
+        if quiet_n >= 2 * HALF + 1 and i % PIECE == 0:
+            remember(clean(fring), i)
 
         ring.append(fr); ring = ring[-4:]
         prev = fr
@@ -326,10 +415,12 @@ def analyze(video, job=None, log=print):
             job.analyze["progress"] = min(0.999, i * STEP / dur)
             if time.time() - last_write > 20:
                 # an open stretch isn't judged yet; the viewer plays unanalysed time normally
-                res["analyzedUntil"] = round(((open_st[0] - 1) if open_st else i) * STEP, 1)
+                res["analyzedUntil"] = round(min([((open_st[0] - 1) if open_st else i) * STEP] +
+                                                 [x[0][0] for x in pending]), 1)
                 write_json(out, res)
                 last_write = time.time()
     p.wait()
+    settle_all(clean(fring[-(GAP + 1):]) if fring else None)
     if open_st:
         close(open_st, None)
     res["analyzedUntil"] = round(i * STEP, 1)

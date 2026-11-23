@@ -21,6 +21,13 @@
     return 0.00002 * Math.pow(10, strict * 2.5);           // 0.00002 … 0.0063
   }
 
+  // pieces of a stretch (analysis version 2) are judged by the share of the canvas where paint
+  // went on in that piece and stayed (pointing and gesturing score 0 or close to it)
+  function pieceThreshold(strict){
+    return 0.000005 * Math.pow(10, strict * 2.4);          // 0.00002 at the default, 0.0013 at the top
+  }
+  var BRIDGE = 5;     // a dropped piece of up to this many seconds between kept ones is kept too
+
   function fillGaps(mask, maxGap){                         // true runs separated by ≤ maxGap samples merge
     var n = mask.length, last = -1;
     for(var i = 0; i < n; i++){
@@ -109,10 +116,19 @@
     // painting: canvas stretches whose before/after differ enough
     var thr = changeThreshold(o.strict);
     var paintRanges = [];
+    var pthr = pieceThreshold(o.strict);
     (A.stretches || []).forEach(function(s){
       if(s[1] > until) return;
+      var add = function(a, b){ paintRanges.push([Math.max(0, a - o.lead), Math.min(until, b + o.lead)]); };
+      if(s[3] && s[3].length && o.strict > 0.001){
+        // judged piece by piece: keep the pieces where the painting changed, bridging short gaps
+        var kept = [];
+        s[3].forEach(function(p){ if(p[2] >= pthr) kept.push([p[0], p[1]]); });
+        mergeRanges(kept, BRIDGE).forEach(function(r){ add(r[0], r[1]); });
+        return;
+      }
       var unknown = s[2] < 0;
-      if(unknown ? o.strict < 0.5 : s[2] >= thr) paintRanges.push([Math.max(0, s[0] - o.lead), Math.min(until, s[1] + o.lead)]);
+      if(unknown ? o.strict < 0.5 : s[2] >= thr) add(s[0], s[1]);
     });
     paintRanges = mergeRanges(paintRanges, 1.5);
     var paint = new Uint8Array(n);
@@ -168,5 +184,5 @@
   }
 
   root.BW = { CAT: CAT, DEFAULTS: DEFAULTS, derive: derive, findRange: findRange, total: total,
-              changeThreshold: changeThreshold };
+              changeThreshold: changeThreshold, pieceThreshold: pieceThreshold };
 })(typeof self !== "undefined" ? self : this);
