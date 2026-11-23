@@ -99,8 +99,14 @@ Safari on the iPad (the helper's window shows the address). You get the same vid
 the PC, and videos stream from it with nothing to copy. Away from home this works over
 Tailscale too, using the PC's Tailscale name or `100.x` address. Windows may ask once to let
 Python through the firewall; allow it on private networks. This copy of the app needs the PC
-and keeps its own saved places and settings, separate from the home-screen app below. To
-turn streaming off, add `"network": false` to `helper/config.json`.
+and keeps its own settings, separate from the home-screen app below. To turn streaming off,
+add `"network": false` to `helper/config.json`.
+
+**Picking up where you left off:** the helper remembers where you were in each video (in
+`helper/positions.json`), so stop on the PC and the iPad starts from there, and the other way
+round. Whichever device moved last wins; a video left paused on one device moves to the newer
+place when you come back to it. This works for every copy of the app that reaches the helper
+(not the home-screen app below, which Safari doesn't let talk to it).
 
 **Copying the files over:**
 

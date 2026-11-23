@@ -21,6 +21,7 @@ PORT = 8777
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)                       # the viewer's files, served at /
 CONFIG = os.path.join(HERE, "config.json")
+POSITIONS = os.path.join(HERE, "positions.json")     # where you were in each video, shared by every device
 STEP = 0.5                                            # seconds per sample
 W, H = 384, 216                                       # analysis frame size
 PIECE = 10                                            # samples per piece of a stretch (5 s)
@@ -572,6 +573,36 @@ def load_config():
     return cfg
 
 
+class Positions:
+    """Where you were in each video, keyed like the viewer's saved sessions (name|duration),
+    so the PC and the iPad pick up from each other. The newest save wins."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        try:
+            self.data = json.load(open(POSITIONS))
+        except Exception:
+            self.data = {}
+
+    def get(self, key):
+        with self.lock:
+            return self.data.get(key)
+
+    def put(self, key, pos, at):
+        with self.lock:
+            old = self.data.get(key)
+            if old and old.get("at", 0) >= at:
+                return old
+            self.data[key] = {"pos": round(pos, 2), "at": at}
+            tmp = POSITIONS + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(self.data, fh)
+            os.replace(tmp, POSITIONS)
+            return self.data[key]
+
+
+POS = Positions()
+
+
 def vid_id(path):
     return hashlib.sha1(os.path.normcase(os.path.abspath(path)).encode()).hexdigest()[:16]
 
@@ -701,6 +732,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "unknown video"}, 404)
             LIB.start(i)
             return self.send_json(LIB.status(i))
+        if u.path == "/api/position":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                b = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
+                key, pos, at = str(b["key"])[:300], float(b["pos"]), float(b["at"])
+            except Exception:
+                return self.send_json({"error": "bad position"}, 400)
+            return self.send_json(POS.put(key, pos, at))
         self.send_json({"error": "not found"}, 404)
 
     def do_GET(self):
@@ -710,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"app": "brushwork-helper", "version": VERSION})
             if u.path == "/api/library":
                 return self.send_json(LIB.scan())
+            if u.path == "/api/position":
+                return self.send_json(POS.get(q.get("key", [""])[0]) or {})
             if u.path in ("/api/status", "/api/analysis", "/video", "/api/images", "/image"):
                 i = q.get("id", [""])[0]
                 if i not in LIB.paths:

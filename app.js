@@ -79,6 +79,36 @@
   }
 
   function helperURL(path){ return state.helper + path; }
+
+  // Where you were in each video is also kept by the helper, so the PC and the iPad pick up
+  // from each other. The newest save wins.
+  function remotePos(key){
+    if(state.helper === null) return Promise.resolve(null);
+    return withTimeout(fetchJSON(helperURL("/api/position?key=" + encodeURIComponent(key))), 1500)
+      .then(function(j){ return j && j.at ? j : null; }).catch(function(){ return null; });
+  }
+  function pushPos(key, pos, at){
+    if(state.helper === null) return;
+    try{
+      fetch(helperURL("/api/position"), { method: "POST", keepalive: true,     // plain text: no preflight
+        body: JSON.stringify({ key: key, pos: pos, at: at }) }).catch(function(){});
+    }catch(e){}
+  }
+  // coming back to a paused video: move to where another device got to meanwhile
+  function catchUp(){
+    var s = state.session;
+    if(!s || !s.key || !video.paused || $("player").hidden) return;
+    Promise.all([remotePos(s.key), Store.getSession(s.key)]).then(function(r){
+      var remote = r[0], saved = r[1] || { key: s.key, name: s.name, source: s.source };
+      if(!remote || state.session !== s || !video.paused) return;
+      if(remote.at > (saved.posAt || 0) && Math.abs(remote.pos - video.currentTime) > 5){
+        saved.position = remote.pos; saved.posAt = remote.at;
+        Store.putSession(saved);
+        seekTo(remote.pos);
+        toast("Picked up at " + fmt(remote.pos) + " from another device", 3500);
+      }
+    });
+  }
   function run(s){ return s && (s.state === "running" || s.state === "elsewhere"); }
 
   // ------------------------------------------------------------------ library
@@ -241,9 +271,12 @@
     video.muted = state.userMuted;
     video.addEventListener("loadedmetadata", function once(){
       video.removeEventListener("loadedmetadata", once);
-      var dur = A ? A.video.duration : video.duration;
-      sess.key = sessionKey(sess.name, dur);
-      Store.getSession(sess.key).then(function(saved){
+      var dur = A ? A.video.duration : video.duration, key = sessionKey(sess.name, dur);
+      // sess.key is set only once the place is restored, so nothing saves 0:00 over it meanwhile
+      Promise.all([Store.getSession(key), remotePos(key)]).then(function(r){
+        var saved = r[0], remote = r[1];
+        if(state.session !== sess) return;
+        sess.key = key;
         if(!state.A && saved && saved.analysis){ state.A = saved.analysis; }
         if(!state.A){
           state.A = { app: "brushwork", video: { name: sess.name, duration: video.duration }, step: 0.5,
@@ -252,10 +285,16 @@
         }
         rederive();
         BWImages.open(sess, state.pendingImages); state.pendingImages = null;
-        if(saved && saved.position && saved.position < dur - 5) video.currentTime = saved.position;
+        // where you were: this device's place, or the helper's if another device saved one since
+        var pos = saved && saved.position || 0, posAt = saved && (saved.posAt || saved.updated) || 0, other = false;
+        if(remote && remote.at > posAt && Math.abs(remote.pos - pos) > 5){ pos = remote.pos; posAt = remote.at; other = true; }
+        if(pos && pos < dur - 5){
+          video.currentTime = pos;
+          if(other) toast("Picked up at " + fmt(pos) + " from another device", 3500);
+        }
         Store.putSession(Object.assign(saved || {}, { key: sess.key, name: sess.name, source: sess.source,
                                                       analysis: sess.source === "file" ? state.A : undefined,
-                                                      position: saved && saved.position || 0 }));
+                                                      position: pos, posAt: posAt }));
       });
     });
     updateModeButtons();
@@ -453,7 +492,12 @@
     state.lastSave = Date.now();
     Store.getSession(s.key).then(function(saved){
       saved = saved || { key: s.key, name: s.name, source: s.source };
-      saved.position = video.currentTime;
+      var t = video.currentTime;
+      // only a real move counts as newer: a paused tab mustn't keep claiming the place
+      if(Math.abs(t - (saved.position || 0)) > 0.5 || !saved.posAt){
+        saved.position = t; saved.posAt = Date.now();
+        pushPos(s.key, t, saved.posAt);
+      }
       if(s.source === "file" && state.A && state.A.samples.canvas.length) saved.analysis = state.A;
       Store.putSession(saved);
     });
@@ -1190,7 +1234,8 @@
   document.addEventListener("keyup", function(e){ if((e.key === "h" || e.key === "H") && hold.key) endHold(); });
 
   window.addEventListener("pagehide", function(){ saveSession(true); });
-  document.addEventListener("visibilitychange", function(){ if(document.hidden) saveSession(true); });
+  document.addEventListener("visibilitychange", function(){ if(document.hidden) saveSession(true); else catchUp(); });
+  window.addEventListener("focus", catchUp);
 
   // ------------------------------------------------------------------ start
   BWImages.init({ video: video, toast: toast, fmt: fmt, stemOf: stemOf, helperURL: helperURL, fetchJSON: fetchJSON });
