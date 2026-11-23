@@ -471,8 +471,10 @@ def busy_elsewhere(path, secs=90):
 
 
 def analysis_complete(video):
+    """Finished, and made by this version of the analysis (an older one is redone by process)."""
     try:
-        return json.load(open(analysis_path(video))).get("complete", False)
+        a = json.load(open(analysis_path(video)))
+        return a.get("complete", False) and a.get("version", 1) >= VERSION
     except Exception:
         return False
 

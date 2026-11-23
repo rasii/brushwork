@@ -103,8 +103,15 @@ sits in a corner picture-in-picture, a webcam strip at the side. The helper:
   (the gallery view at the start, a screen share) is "other views";
 - measures motion over the canvas (minus the inset) and over the palette, at 2 frames a
   second, 384×216;
-- groups canvas motion into stretches and compares the canvas just before and just after
-  each one: if the painting didn't change, it was pointing or hovering, not painting;
+- groups canvas motion into stretches and splits each stretch into 5-second pieces, then
+  measures how much paint each piece added, at 768×432. A change counts only if it stays:
+  it's compared with a clean canvas (the hand removed by taking the median of several
+  frames) from just before the stretch, from just after it, from 30 seconds later, and
+  from at least 30 seconds before. So pointing and gesturing, a brush resting on the
+  panel, and a hand held still don't count as painting, and the parts of a long stretch
+  that were only talking with the hands over the canvas are skipped. Small camera shakes
+  and lighting shifts are allowed for. (Analyses from before v1.12 judge whole stretches;
+  the viewer still reads them, and **Process a folder** redoes them);
 - measures loudness every half second for talking (Zoom silences the room between
   phrases, so speech stands out clearly).
 

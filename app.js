@@ -88,7 +88,8 @@
     BWImages.close();
     state.session = null; state.A = null; state.D = null; state.peek = null;
     $("player").hidden = true; $("library").hidden = false;
-    $("backBtn").hidden = true; $("statsBtn").hidden = true; $("settingsBtn").hidden = true;
+    $("backBtn").hidden = true; $("statsBtn").hidden = true; $("settingsBtn").hidden = true; $("pictureBtn").hidden = true;
+    $("pictureModal").classList.remove("show");
     $("title").textContent = "Brushwork"; $("subtitle").textContent = "";
     document.body.classList.remove("fs");
     renderLibrary();
@@ -218,7 +219,7 @@
   function openPlayer(sess, src, A){
     state.session = sess; state.A = A; state.peek = null; state.rateCap = null;
     $("library").hidden = true; $("player").hidden = false;
-    $("backBtn").hidden = false; $("statsBtn").hidden = false; $("settingsBtn").hidden = false;
+    $("backBtn").hidden = false; $("statsBtn").hidden = false; $("settingsBtn").hidden = false; $("pictureBtn").hidden = false;
     $("title").textContent = stemOf(sess.name);
     $("subtitle").textContent = sess.source === "helper" ? "" : "";
     video.src = src;
@@ -690,8 +691,38 @@
     b.addEventListener("click", function(){ state.settings.fastRate = +b.dataset.rate; settingChanged(); });
   });
   $("resetSettings").addEventListener("click", function(){
-    var keep = { speed: state.settings.speed, holdRate: state.settings.holdRate };   // speed has its own sheet
+    var s = state.settings;    // speed and the picture have their own sheets
+    var keep = { speed: s.speed, holdRate: s.holdRate, saturation: s.saturation, contrast: s.contrast, brightness: s.brightness };
     state.settings = Object.assign({}, BW.DEFAULTS, keep); settingChanged();
+  });
+
+  // ------------------------------------------------------------------ picture
+  var PIC = [["satRange", "satVal", "saturation"], ["conRange", "conVal", "contrast"], ["briRange", "briVal", "brightness"]];
+  function applyPicture(){
+    var s = state.settings, f = [];
+    if(s.saturation !== 1) f.push("saturate(" + s.saturation + ")");
+    if(s.contrast !== 1) f.push("contrast(" + s.contrast + ")");
+    if(s.brightness !== 1) f.push("brightness(" + s.brightness + ")");
+    video.style.filter = f.join(" ");
+    PIC.forEach(function(p){
+      $(p[0]).value = s[p[2]];
+      $(p[1]).textContent = Math.round(s[p[2]] * 100) + "%";
+    });
+    $("pictureBtn").classList.toggle("on", f.length > 0);
+  }
+  PIC.forEach(function(p){
+    $(p[0]).addEventListener("input", function(){
+      var v = +this.value;
+      if(Math.abs(v - 1) < 0.025) v = 1;     // snaps to "as recorded"
+      state.settings[p[2]] = v; Store.set("settings", state.settings); applyPicture();
+    });
+  });
+  $("resetPicture").addEventListener("click", function(){
+    state.settings.saturation = state.settings.contrast = state.settings.brightness = 1;
+    Store.set("settings", state.settings); applyPicture();
+  });
+  $("pictureBtn").addEventListener("click", function(){
+    applyPicture(); $("pictureModal").classList.toggle("show");
   });
 
   // ------------------------------------------------------------------ speed
@@ -957,7 +988,7 @@
   };
   Promise.all([Store.get("settings"), Store.get("mode"), findHelper()]).then(function(r){
     if(r[0]) state.settings = Object.assign({}, BW.DEFAULTS, r[0]);
-    syncSpeedUI();
+    syncSpeedUI(); applyPicture();
     if(r[1] && MODES.indexOf(r[1]) >= 0) state.mode = r[1];
     state.helper = r[2];
     renderLibrary();

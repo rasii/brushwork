@@ -12,7 +12,10 @@
     talk: 0,           // talking sensitivity, dB added to the detected threshold (− = more counts as talking)
     fastRate: 8,
     speed: 1,          // playback speed for everything that plays at "normal" speed
-    holdRate: 2        // speed while the video is touched and held
+    holdRate: 2,       // speed while the video is touched and held
+    saturation: 1,     // picture adjustments (1 = as recorded)
+    contrast: 1,
+    brightness: 1
   };
 
   // strictness slider → least share of the canvas that must change for a stretch to count
