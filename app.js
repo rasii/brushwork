@@ -828,9 +828,46 @@
     var r = $("player").getBoundingClientRect();
     return y > r.bottom - ($("dock").offsetHeight + 40);
   }
+  // step through watched time only: in the skipping modes, skipped parts don't count, so a jump
+  // back from early in a stretch lands in the previous stretch instead of being skipped forward again
+  function stepKept(K, t, d){
+    var i = BW.findRange(K, t), rem = Math.abs(d), j, avail;
+    if(d < 0){
+      j = i >= 0 ? i : -i - 2;
+      if(j < 0) return t;
+      if(i < 0) t = K[j][1];
+      for(;;){
+        avail = t - K[j][0];
+        if(rem <= avail) return t - rem;
+        rem -= avail; j--;
+        if(j < 0) return K[0][0];
+        t = K[j][1];
+      }
+    }
+    j = i >= 0 ? i : -i - 1;
+    if(j >= K.length) return t;
+    if(i < 0) t = K[j][0];
+    for(;;){
+      avail = K[j][1] - t;
+      if(rem < avail) return t + rem;
+      rem -= avail; j++;
+      if(j >= K.length) return Math.max(K[j - 1][0], K[j - 1][1] - 0.5);
+      t = K[j][0];
+    }
+  }
   function tapSeek(side){
-    if(side === "left"){ state.peek = null; $("peekBar").hidden = true; seekTo(video.currentTime - 10); }
-    else seekTo(video.currentTime + 10);
+    var d = side === "left" ? -10 : 10, t = video.currentTime;
+    var K = state.mode === "all" || state.mode === "fast" ? null : keepList();
+    if(!K || !K.length) seekTo(t + d);
+    else if(state.peek && t + d >= state.peek[0] && t + d <= state.peek[1]) seekTo(t + d);   // within the part being watched
+    else{
+      if(state.peek){   // leave the skipped part, counting the time spent in it
+        var edge = d < 0 ? state.peek[0] : state.peek[1];
+        d = d < 0 ? Math.min(0, d + (t - edge)) : Math.max(0, d - (edge - t));
+        t = edge; state.peek = null; $("peekBar").hidden = true;
+      }
+      seekTo(stepKept(K, t, d));
+    }
     tap.total += 10;
     var f = $("seekFlash");
     f.className = "seekflash " + side;
