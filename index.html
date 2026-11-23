@@ -32,7 +32,7 @@
   </div>
   <div class="head-right">
     <span class="pill" id="helperPill" hidden title="The Brushwork helper on this PC is running">PC helper</span>
-    <button class="text-btn" id="pictureBtn" hidden>Picture</button>
+    <button class="text-btn" id="pictureBtn" hidden>Video effects</button>
     <button class="text-btn" id="statsBtn" hidden>Time split</button>
     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings" hidden>
       <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
@@ -51,8 +51,8 @@
 
   <section id="helperSection" hidden>
     <h2>On this PC</h2>
-    <p class="hint">Videos in your folders. Opening one that hasn't been analysed starts the analysis;
-      it plays straight away and the skipping modes switch on as the analysis catches up.</p>
+    <p class="hint">Videos in your folders. Opening one that isn't ready asks before processing
+      it; it plays straight away and the skipping modes switch on as the analysis catches up.</p>
     <div id="helperList" class="list"></div>
   </section>
 
@@ -71,7 +71,9 @@
 <main id="player" hidden>
   <div class="stage" id="stage">
     <video id="video" playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
+    <div class="matchbox" id="matchBox" hidden><div class="matchrect" id="matchRect"></div><div class="matchtip">Drag a box around the painting · Esc to cancel</div></div>
     <div class="toast" id="toast" hidden></div>
+    <div class="diag" id="diag" hidden><pre id="diagText"></pre><button class="text-btn" id="diagCopy">Copy</button></div>
     <div class="peek" id="peekBar" hidden>
       <span id="peekText">Watching a part that's normally skipped</span>
       <button class="text-btn" id="peekStop">Back to skipping</button>
@@ -185,10 +187,10 @@
   </div>
 </div>
 
-<!-- ============ picture sheet (no dimming, so the video can be judged while adjusting) ============ -->
+<!-- ============ video effects sheet (no dimming, so the video can be judged while adjusting) ============ -->
 <div class="modal clear" id="pictureModal">
   <div class="sheet">
-    <h2>Picture</h2>
+    <h2>Video effects</h2>
     <label class="field">
       <span>Saturation</span>
       <input type="range" id="satRange" min="0.3" max="1.5" step="0.01">
@@ -204,10 +206,29 @@
       <input type="range" id="briRange" min="0.6" max="1.5" step="0.01">
       <span class="ends"><span>Darker</span><span id="briVal"></span><span>Brighter</span></span>
     </label>
-    <p class="hint">Applies to every video.</p>
-    <div class="sheet-foot"><button class="text-btn" id="resetPicture">Reset</button><button class="primary" data-close>Done</button></div>
+    <label class="field">
+      <span>Warmth</span>
+      <input type="range" id="warmRange" min="-1" max="1" step="0.01">
+      <span class="ends"><span>Cooler</span><span id="warmVal"></span><span>Warmer</span></span>
+    </label>
+    <label class="field">
+      <span>Tint</span>
+      <input type="range" id="tintRange" min="-1" max="1" step="0.01">
+      <span class="ends"><span>Greener</span><span id="tintVal"></span><span>Pinker</span></span>
+    </label>
+    <p class="hint">Applies to every video. <b>Match</b> sets all five for you: open the finished painting
+      (or a progress photo) in the picture window, tap Match, then drag a box around the painting in the video.
+      Zoom the picture window in to match just part of it.</p>
+    <div class="sheet-foot"><button class="text-btn" id="resetPicture">Reset</button>
+      <span><button class="text-btn" id="matchPicture">Match</button> <button class="primary" data-close>Done</button></span></div>
   </div>
 </div>
+<!-- warmth and tint: per-channel gains, set by applyPicture -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="bwTone" color-interpolation-filters="sRGB">
+    <feColorMatrix id="bwToneMatrix" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+  </filter>
+</svg>
 
 <!-- ============ stats sheet ============ -->
 <div class="modal" id="statsModal">
@@ -222,6 +243,19 @@
     <p class="hint">Painting is time with the brush at the canvas where the painting visibly changed
       (set by the slider above). Palette is hand movement over the palette camera. Talking overlaps the others.</p>
     <div class="sheet-foot"><button class="primary" data-close>Done</button></div>
+  </div>
+</div>
+
+<!-- ============ process a video? ============ -->
+<div class="modal" id="processModal">
+  <div class="sheet">
+    <h2 id="processTitle"></h2>
+    <p id="processWhat"></p>
+    <p class="hint">Processing has the PC analyse it and make a prepped copy: about 20 minutes for a 3-hour
+      session. It plays straight away, and the skipping modes switch on as the analysis catches up.
+      <b>Just watch</b> plays it as it is, with no skipping and nothing started.</p>
+    <div class="sheet-foot"><button class="text-btn" data-close>Cancel</button>
+      <span><button class="text-btn" id="processWatch">Just watch</button> <button class="primary" id="processGo">Process and watch</button></span></div>
   </div>
 </div>
 

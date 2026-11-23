@@ -159,6 +159,9 @@ canvas{ display:block; width: 100%; touch-action: none; cursor: pointer; }
   background: rgba(0,0,0,.55); padding: 20px;
 }
 .modal.show{ display:flex; }
+.diag{ position:absolute; left: 8px; top: 8px; z-index: 40; background: rgba(0,0,0,.8); color: #e6e0d4;
+  border-radius: 6px; padding: 8px 10px; font: 11px/1.35 ui-monospace, Consolas, monospace; max-width: 520px; }
+.diag pre{ margin: 0 0 6px; white-space: pre-wrap; max-height: 60vh; overflow: auto; }
 .modal.clear{ background: none; align-items: flex-start; justify-content: flex-end; padding-top: 58px; pointer-events: none; }
 .modal.clear .sheet{ pointer-events: auto; max-width: 340px; box-shadow: 0 6px 30px rgba(0,0,0,.5); }
 .sheet{
@@ -250,3 +253,7 @@ body.immersive:not(.ui-hidden) .peek{ bottom: calc(var(--dock-h, 0px) + 14px); }
 .chip{ flex: 0 0 auto; background: rgba(24,22,19,.85); border: 1px solid var(--line); border-radius: 99px;
   padding: 6px 12px; font-size: 12.5px; white-space: nowrap; }
 .chip.on{ background: var(--sienna); color: #1b140d; border-color: var(--sienna); font-weight: 600; }
+.matchbox{ position: absolute; inset: 0; z-index: 30; cursor: crosshair; touch-action: none; }
+.matchrect{ position: absolute; border: 2px dashed var(--sienna); background: rgba(255,255,255,.06); display: none; }
+.matchtip{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.75); color: #fff;
+  padding: 6px 12px; border-radius: 8px; font-size: 14px; pointer-events: none; }

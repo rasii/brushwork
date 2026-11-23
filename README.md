@@ -13,7 +13,7 @@ and when he's **talking**. Then you choose what to watch:
 | Everything | the whole video |
 | Painting | only the painting stretches |
 | Painting + talking | painting, plus everything he says |
-| Fast-forward the rest | painting at normal speed, everything else at 2–16× without sound |
+| Fast-forward the rest | painting and talking at normal speed, everything else at 2–16× without sound |
 
 Tap anywhere on the timeline — including a hatched (skipped) part — to watch it; the app
 goes back to skipping when that part ends. The eye button (or **W**) replays the part
@@ -49,6 +49,13 @@ close it. The camera button (or **G**) saves the current video frame as an image
 that session's own ("Session 1 …") first; processing a video also copies them, scaled to at
 most 4096 px, into its `brushwork` folder for the iPad.
 
+**Video effects:** saturation, contrast, brightness, warmth and tint, to bring the
+recording's colours closer to the real painting; one setting for every video, kept on each
+device. **Match** sets all five for you: open the finished painting (or a progress photo) in
+the picture window, tap Match, and drag a box around the painting in the video. The app
+compares the colours of the two and sets the sliders. Zoom the picture window in to match
+just part of the image, and fine-tune by eye afterwards.
+
 Made for an iPad saved to the home screen, like Comp-Art; works in any modern browser.
 Videos never leave the device.
 
@@ -71,8 +78,8 @@ Analysing a 3-hour session takes about 15 minutes; prepping about 20 (they run t
 
 1. Put your video folders in `helper/config.json` (copy `config.example.json`).
 2. Double-click **Brushwork Helper.bat**. It opens the viewer at http://127.0.0.1:8777/ and
-   lists your videos. Opening one that hasn't been analysed starts the analysis and the
-   prep; the video plays straight away, and the skipping modes switch on as the analysis
+   lists your videos. Opening one that hasn't been analysed and prepped asks first, then
+   starts both (or **Just watch** plays it as it is); the video plays straight away, and the skipping modes switch on as the analysis
    catches up (it works front to back, the first hour is ready in about 5 minutes). When
    the prepped copy is ready the viewer switches to it without interrupting.
 3. To process videos ahead of time (overnight), drag a video or a whole folder onto
@@ -86,6 +93,16 @@ Needs Python 3 with numpy (`py -3.8` is what the launchers call) and ffmpeg on t
 Uses the NVIDIA encoder when there is one, otherwise x264.
 
 ## On the iPad
+
+**Streaming from the PC:** while the helper runs, open `http://<the PC's address>:8777/` in
+Safari on the iPad (the helper's window shows the address). You get the same video list as on
+the PC, and videos stream from it with nothing to copy. Away from home this works over
+Tailscale too, using the PC's Tailscale name or `100.x` address. Windows may ask once to let
+Python through the firewall; allow it on private networks. This copy of the app needs the PC
+and keeps its own saved places and settings, separate from the home-screen app below. To
+turn streaming off, add `"network": false` to `helper/config.json`.
+
+**Copying the files over:**
 
 1. Copy the video's `brushwork` folder (the prepped video, its `.brushwork.json` and the images) to the
    iPad, e.g. into Files › On My iPad.

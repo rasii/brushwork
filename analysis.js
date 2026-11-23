@@ -15,7 +15,9 @@
     holdRate: 2,       // speed while the video is touched and held
     saturation: 1,     // picture adjustments (1 = as recorded)
     contrast: 1,
-    brightness: 1
+    brightness: 1,
+    warmth: 0,         // -1 cooler .. 1 warmer (0 = as recorded)
+    tint: 0            // -1 greener .. 1 more magenta
   };
 
   // strictness slider → least share of the canvas that must change for a stretch to count
@@ -159,7 +161,7 @@
       talk: mergeRanges(paintRanges.concat(speechRanges.filter(function(r){ return r[0] < until; })
                                            .map(function(r){ return [r[0], Math.min(r[1], until)]; }), rest), 0.6)
     };
-    keep.fast = keep.paint;
+    keep.fast = keep.talk;     // painting and talking at normal speed, the rest fast-forwarded
 
     var secs = [0, 0, 0, 0, 0], talkSecs = 0;
     for(i = 0; i < n; i++){ secs[cat[i]] += step; if(i < nA && speech[i]) talkSecs += step; }
@@ -168,7 +170,7 @@
       talking: talkSecs, duration: dur, analyzedUntil: until,
       kept: { all: dur, paint: total(keep.paint), talk: total(keep.talk) }
     };
-    stats.kept.fast = stats.kept.paint + (dur - stats.kept.paint) / o.fastRate;
+    stats.kept.fast = stats.kept.talk + (dur - stats.kept.talk) / o.fastRate;
 
     return { step: step, n: n, until: until, cat: cat, speech: speech, keep: keep, stats: stats,
              paintRanges: paintRanges, settings: o };

@@ -1,6 +1,7 @@
 """Brushwork helper — runs on the PC.
 
-  py -3.8 brushwork.py serve            start the helper (the viewer finds it at http://127.0.0.1:8777)
+  py -3.8 brushwork.py serve            start the helper (the viewer finds it at http://127.0.0.1:8777;
+                                        an iPad on the same network opens http://<this PC>:8777)
   py -3.8 brushwork.py process <path>   analyze + prep a video, or every .mp4 in a folder
 
 For each video it writes, in a "brushwork" folder next to the video:
@@ -565,7 +566,7 @@ def _safe(fn, video, job, log, key):
 # ----------------------------------------------------------------------------- server
 
 def load_config():
-    cfg = {"folders": [], "port": PORT}
+    cfg = {"folders": [], "port": PORT, "network": True}     # network: other devices at home can stream
     if os.path.exists(CONFIG):
         cfg.update(json.load(open(CONFIG)))
     return cfg
@@ -657,6 +658,15 @@ MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".js
         ".webp": "image/webp", ".gif": "image/gif"}
 
 
+DEBUG_LOG = os.environ.get("BW_DEBUG")     # a file to log video requests to, for chasing playback stalls
+
+
+def debug(msg):
+    if DEBUG_LOG:
+        with open(DEBUG_LOG, "a") as fh:
+            fh.write(f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} [{threading.get_ident() % 10000:4d}] {msg}\n")
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -728,7 +738,8 @@ class Handler(BaseHTTPRequestHandler):
             # the viewer app itself
             rel = unquote(u.path).lstrip("/") or "index.html"
             f = os.path.normpath(os.path.join(APP_DIR, rel))
-            if not f.startswith(APP_DIR) or not os.path.isfile(f) or os.sep + "helper" + os.sep in f:
+            parts = os.path.relpath(f, APP_DIR).split(os.sep)
+            if parts[0] in ("..", "helper") or any(x.startswith(".") for x in parts) or not os.path.isfile(f):
                 return self.send_json({"error": "not found"}, 404)
             return self.send_file(f, MIME.get(os.path.splitext(f)[1].lower(), "application/octet-stream"), nocache=True)
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
@@ -758,15 +769,37 @@ class Handler(BaseHTTPRequestHandler):
         if nocache:
             self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        with open(f, "rb") as fh:
-            fh.seek(start)
-            left = end - start + 1
-            while left > 0:
-                chunk = fh.read(min(1 << 20, left))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                left -= len(chunk)
+        video = ctype == "video/mp4"
+        t0, sent = time.time(), 0
+        if video:
+            debug(f"GET {rng or 'all'} -> {start}-{end} ({(end - start + 1) >> 20} MB) from {self.client_address[1]}")
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(start)
+                left = end - start + 1
+                while left > 0:
+                    chunk = fh.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk); sent += len(chunk)
+            if video:
+                debug(f"done {start}: {sent >> 10} KB in {time.time() - t0:.2f} s")
+        except Exception as e:
+            if video:
+                debug(f"closed {start}: {sent >> 10} KB in {time.time() - t0:.2f} s ({type(e).__name__})")
+            raise
+
+
+def lan_address():
+    """This PC's address on the home network (no traffic is sent)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("192.168.0.1", 9)); ip = s.getsockname()[0]; s.close()
+        return ip
+    except OSError:
+        return None
 
 
 def serve(open_browser=False):
@@ -775,8 +808,9 @@ def serve(open_browser=False):
         print(f"No video folders set. Add them to {CONFIG}, e.g. {{\"folders\": [\"D:/Videos/Painting demos\"]}}")
     port = cfg.get("port", PORT)
     url = f"http://127.0.0.1:{port}/"
+    host = "0.0.0.0" if cfg.get("network", True) else "127.0.0.1"
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        srv = ThreadingHTTPServer((host, port), Handler)
     except OSError:
         # most likely the helper is already running in another window
         print(f"Port {port} is already in use - the helper is probably already running. Opening {url}")
@@ -787,6 +821,10 @@ def serve(open_browser=False):
         return
     print(f"Brushwork helper running - open {url}  (close this window to stop it)")
     print("Video folders:", ", ".join(cfg["folders"]) or "(none)")
+    if host != "127.0.0.1":
+        ip = lan_address()
+        print(f"On an iPad on the same network, open http://{ip or '<this PC>'}:{port}/ in Safari"
+              "  (set \"network\": false in config.json to turn this off)")
     if open_browser:   # only once the server is listening, so the first page load works
         import webbrowser
         threading.Timer(0.3, webbrowser.open, args=(url,)).start()

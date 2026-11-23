@@ -482,5 +482,8 @@
 
   root.BWImages = { init: init, open: open, close: close, addFiles: addFiles, toggleWindow: toggleWindow,
                     openFull: function(){ openFull(cur >= 0 ? cur : 0); }, isFullOpen: isFullOpen, key: key,
-                    grab: grab, ZoomView: ZoomView };
+                    grab: grab, ZoomView: ZoomView,
+                    // the image in the floating window, if it's open: what "Match" compares the video with
+                    shown: function(){ return ui && ui.open && cur >= 0 && items[cur] && winView.nw ?
+                      { name: items[cur].name, img: winView.img, box: winView.box } : null; } };
 })(self);

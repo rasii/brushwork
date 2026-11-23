@@ -20,6 +20,7 @@
     seeking: false,
     userMuted: false,
     rateCap: null,         // highest playback rate the browser accepted
+    ffCap: null,           // fast-forward speed lowered for this video after a stall
     poll: null,
     lastSave: 0,
     prepped: false
@@ -66,7 +67,8 @@
 
   // ------------------------------------------------------------------ helper (PC)
   function findHelper(){
-    var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port == String(HELPER_PORT);
+    // served by the helper itself: on the PC (127.0.0.1) or from another device at home (the PC's address)
+    var local = location.protocol === "http:" && location.port == String(HELPER_PORT);
     var candidates = local ? [""] : ["http://127.0.0.1:" + HELPER_PORT];
     // an iPad has no helper: only try when this could be the PC
     if(!local && /iPad|iPhone|iPod/.test(navigator.userAgent)) return Promise.resolve(null);
@@ -167,9 +169,22 @@
   }
 
   // ------------------------------------------------------------------ opening
-  function openHelperVideo(v){
+  // A video that isn't ready asks first, so a mistaken tap doesn't start half an hour of work.
+  function openHelperVideo(v, choice){
     var needs = v.analysis !== "done" || !v.prepped;
-    var start = needs && !(v.job && (run(v.job.analyze) || v.job.queued))
+    var busy = v.job && (run(v.job.analyze) || run(v.job.prep) || v.job.queued);
+    if(needs && !busy && !choice){
+      $("processTitle").textContent = v.name;
+      $("processWhat").textContent = v.analysis === "done" ? "It's analysed but has no prepped copy yet." :
+        v.analysis === "partial" ? "Its analysis isn't finished (or was made by an older version)." :
+        "It hasn't been analysed or prepped yet.";
+      $("processGo").onclick = function(){ $("processModal").classList.remove("show"); openHelperVideo(v, "process"); };
+      $("processWatch").onclick = function(){ $("processModal").classList.remove("show"); openHelperVideo(v, "watch"); };
+      showModal("processModal");
+      return;
+    }
+    if(choice === "watch") needs = false;
+    var start = needs && !busy
       ? fetchJSON(helperURL("/api/process?id=" + v.id), { method: "POST" }).catch(function(){}) : Promise.resolve();
     start.then(function(){
       return fetchJSON(helperURL("/api/analysis?id=" + v.id)).catch(function(){ return null; });
@@ -217,7 +232,7 @@
   });
 
   function openPlayer(sess, src, A){
-    state.session = sess; state.A = A; state.peek = null; state.rateCap = null;
+    state.session = sess; state.A = A; state.peek = null; state.rateCap = null; state.ffCap = null;
     $("library").hidden = true; $("player").hidden = false;
     $("backBtn").hidden = false; $("statsBtn").hidden = false; $("settingsBtn").hidden = false; $("pictureBtn").hidden = false;
     $("title").textContent = stemOf(sess.name);
@@ -303,6 +318,7 @@
 
   // gapMute: silence a fast-forwarded gap; speech above 4x is noise (and Chrome drops it anyway)
   function setRate(r, gapMute){
+    diag.want = r;
     if(state.rateCap && r > state.rateCap) r = state.rateCap;
     if(video.playbackRate !== r){
       try{ video.playbackRate = r; }catch(e){}
@@ -332,7 +348,7 @@
   function tick(){
     var D = state.D, t = video.currentTime;
     if(!video.paused && !state.seeking && D){
-      var K = keepList();
+      var K = keepList(), inGap = false;
       if(state.mode === "all") setRate(baseRate());
       else if(state.peek){
         if(t >= state.peek[1] - 0.05 || t < state.peek[0] - 1){ state.peek = null; $("peekBar").hidden = true; }
@@ -341,22 +357,90 @@
       if(state.mode !== "all" && !state.peek){
         var i = BW.findRange(K, t);
         if(i >= 0) setRate(baseRate());
-        else if(state.mode === "fast"){ if(state.hold) setRate(baseRate()); else setRate(state.settings.fastRate, true); }
+        else if(state.mode === "fast"){
+          if(state.hold) setRate(baseRate());
+          else{ setRate(Math.min(state.settings.fastRate, state.ffCap || 99), true); inGap = true; }
+        }
         else{
           var ins = -i - 1;
           if(ins < K.length) seekTo(K[ins][0]);
           else{ video.pause(); toast("That's the last of the painting"); }
         }
       }
+      stallWatch(t, inGap);
     }
+    else ff.t = -1;     // paused or seeking: start the stall watch afresh
     if(video.paused && !state.hold) setRate(state.settings.speed);
     updateTime();
   }
+
+  // Some browsers' players get stuck: during a fast-forward, or (Brave) a couple of seconds
+  // after one ends, the clock stops for several seconds although the video is already loaded.
+  // If the clock hasn't moved for a moment while playing, restart playback from the same
+  // spot (a seek clears the stuck player); in a fast-forwarded gap also lower the speed for
+  // this video. When the video simply hasn't loaded yet, wait for it.
+  var ff = { t: -1, since: 0 };
+  function stallWatch(t, inGap){
+    var now = performance.now();
+    if(Math.abs(t - ff.t) > 0.02){ ff.t = t; ff.since = now; }
+    if(now - ff.since < 600) return;
+    var r = video.playbackRate, ahead = 0;
+    for(var i = 0; i < video.buffered.length; i++)
+      if(video.buffered.start(i) <= t + 0.1 && video.buffered.end(i) > t) ahead = video.buffered.end(i) - t;
+    ff.since = now;
+    if(inGap && r > 2){
+      state.ffCap = r > 4 ? 4 : 2;
+      toast("Fast-forward stalled at " + r + "× (the browser " + (ahead > 2 ? "couldn't decode fast enough" :
+            "was waiting for the video to load") + "). Using " + state.ffCap + "× for this video.", 6000);
+    }
+    else if(ahead < 2) return;
+    diag.log.push(new Date().toISOString().slice(11, 23) + " nudge " + t.toFixed(2) + (inGap ? " (stuck in gap)" : " (stuck)"));
+    seekTo(t + 0.05);
+  }
+
+  // diagnostics (D key): what the video is really doing, with a log to copy and send
+  var diag = { on: false, want: 1, log: [], hist: [], next: 0 };
+  ["waiting", "stalled", "playing", "pause", "play", "seeking", "seeked", "ratechange", "volumechange", "emptied", "error"]
+    .forEach(function(ev){ video.addEventListener(ev, function(){
+      diag.log.push([new Date().toISOString().slice(11, 23), ev, video.currentTime.toFixed(2), video.playbackRate,
+                     video.muted ? "muted" : "sound", "rs" + video.readyState].join(" "));
+      if(diag.log.length > 80) diag.log.shift();
+      if(ev === "seeking") diag.hist = [];
+    }); });
+  function diagTick(){
+    var now = performance.now();
+    diag.hist.push([now, video.currentTime]);
+    while(diag.hist.length > 2 && now - diag.hist[0][0] > 1000) diag.hist.shift();
+    if(!diag.on || now < diag.next) return;
+    diag.next = now + 250;
+    var h = diag.hist[0], speed = now > h[0] ? (video.currentTime - h[1]) / ((now - h[0]) / 1000) : 0, ahead = 0, t = video.currentTime;
+    for(var i = 0; i < video.buffered.length; i++)
+      if(video.buffered.start(i) <= t + 0.1 && video.buffered.end(i) > t) ahead = video.buffered.end(i) - t;
+    var q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+    $("diagText").textContent = [
+      "Brushwork " + self.APP_VERSION + "  " + navigator.userAgent.replace(/^.*?\) /, ""),
+      "mode " + state.mode + (state.peek ? " (peek)" : "") + "   time " + fmt(t) + " (" + t.toFixed(2) + ")",
+      "speed asked " + diag.want + "x, set " + video.playbackRate + "x, measured " + speed.toFixed(2) + "x",
+      "caps: browser " + (state.rateCap || "-") + ", stall " + (state.ffCap || "-") + "   settings fast " + state.settings.fastRate + "x",
+      (video.paused ? "paused" : "playing") + (state.seeking ? " seeking" : "") + "  " + (video.muted ? "muted" : "sound") +
+        "  ready " + video.readyState + "  buffered ahead " + ahead.toFixed(1) + " s",
+      q ? "frames " + q.totalVideoFrames + ", dropped " + q.droppedVideoFrames : "",
+      "src " + (video.currentSrc || "").replace(/^.*\/video\?/, "").replace(/&t=\d+/, ""),
+      "", "events:"
+    ].concat(diag.log.slice(-25)).join("\n");
+  }
+  function toggleDiag(){ diag.on = !diag.on; $("diag").hidden = !diag.on; diag.next = 0; }
+  $("diagCopy").addEventListener("click", function(){
+    var text = $("diagText").textContent.replace(/events:[\s\S]*$/, "events:\n" + diag.log.join("\n"));
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function(){ toast("Copied"); },
+      function(){ toast("Couldn't copy — take a screenshot instead"); });
+  });
 
   function loop(){
     if(!$("player").hidden){
       tick();
       drawFrame();
+      diagTick();
       if(Date.now() - state.lastSave > 5000) saveSession();
     }
     requestAnimationFrame(loop);
@@ -692,35 +776,161 @@
   });
   $("resetSettings").addEventListener("click", function(){
     var s = state.settings;    // speed and the picture have their own sheets
-    var keep = { speed: s.speed, holdRate: s.holdRate, saturation: s.saturation, contrast: s.contrast, brightness: s.brightness };
+    var keep = { speed: s.speed, holdRate: s.holdRate, saturation: s.saturation, contrast: s.contrast, brightness: s.brightness,
+                 warmth: s.warmth, tint: s.tint };
     state.settings = Object.assign({}, BW.DEFAULTS, keep); settingChanged();
   });
 
   // ------------------------------------------------------------------ picture
-  var PIC = [["satRange", "satVal", "saturation"], ["conRange", "conVal", "contrast"], ["briRange", "briVal", "brightness"]];
+  // [slider, label, setting, value meaning "as recorded"]
+  var PIC = [["satRange", "satVal", "saturation", 1], ["conRange", "conVal", "contrast", 1], ["briRange", "briVal", "brightness", 1],
+             ["warmRange", "warmVal", "warmth", 0], ["tintRange", "tintVal", "tint", 0]];
+  var WARM = 0.2, TINT = 0.2;      // how far the warmth and tint sliders move each colour at their ends
+  function toneGains(w, t){ return [1 + WARM * w, 1 - TINT * t, 1 - WARM * w]; }
   function applyPicture(){
-    var s = state.settings, f = [];
+    var s = state.settings, f = [], w = s.warmth || 0, t = s.tint || 0;
+    if(w || t){
+      var g = toneGains(w, t);
+      $("bwToneMatrix").setAttribute("values", g[0] + " 0 0 0 0  0 " + g[1] + " 0 0 0  0 0 " + g[2] + " 0 0  0 0 0 1 0");
+      f.push("url(#bwTone)");
+    }
     if(s.saturation !== 1) f.push("saturate(" + s.saturation + ")");
     if(s.contrast !== 1) f.push("contrast(" + s.contrast + ")");
     if(s.brightness !== 1) f.push("brightness(" + s.brightness + ")");
     video.style.filter = f.join(" ");
     PIC.forEach(function(p){
-      $(p[0]).value = s[p[2]];
-      $(p[1]).textContent = Math.round(s[p[2]] * 100) + "%";
+      var v = s[p[2]] == null ? p[3] : s[p[2]];
+      $(p[0]).value = v;
+      $(p[1]).textContent = p[3] === 1 ? Math.round(v * 100) + "%" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v * 100));
     });
     $("pictureBtn").classList.toggle("on", f.length > 0);
   }
   PIC.forEach(function(p){
     $(p[0]).addEventListener("input", function(){
       var v = +this.value;
-      if(Math.abs(v - 1) < 0.025) v = 1;     // snaps to "as recorded"
+      if(Math.abs(v - p[3]) < 0.025) v = p[3];     // snaps to "as recorded"
       state.settings[p[2]] = v; Store.set("settings", state.settings); applyPicture();
     });
   });
   $("resetPicture").addEventListener("click", function(){
-    state.settings.saturation = state.settings.contrast = state.settings.brightness = 1;
+    PIC.forEach(function(p){ state.settings[p[2]] = p[3]; });
     Store.set("settings", state.settings); applyPicture();
   });
+
+  // Match: compare the painting in the video (a box the user drags) with the image in the
+  // picture window (the part of it in view) and set all five sliders so their colours agree.
+  // Each step is fitted on the video's colours as the previous steps leave them, in the
+  // order the filter applies them: warmth and tint (average colour), then saturation
+  // (how far colours stand from grey), then contrast and brightness (spread and average of
+  // lightness).
+  var match = null;
+  $("matchPicture").addEventListener("click", function(){
+    var ref = BWImages.shown();
+    if(!ref){ toast("Open the finished painting or a progress photo in the picture window first (the picture button or I), then tap Match.", 6000); return; }
+    if(!video.videoWidth){ toast("Open a video first"); return; }
+    $("pictureModal").classList.remove("show");
+    match = { ref: ref, x0: 0, y0: 0 };
+    $("matchRect").style.display = "none";
+    $("matchBox").hidden = false;
+  });
+  function endMatch(){ match = null; $("matchBox").hidden = true; }
+  $("matchBox").addEventListener("pointerdown", function(e){
+    if(!match) return;
+    e.preventDefault(); e.stopPropagation();
+    try{ this.setPointerCapture(e.pointerId); }catch(err){}
+    var r = this.getBoundingClientRect();
+    match.x0 = e.clientX - r.left; match.y0 = e.clientY - r.top; match.drag = true;
+    drawMatchRect(match.x0, match.y0);
+  });
+  $("matchBox").addEventListener("pointermove", function(e){
+    if(!match || !match.drag) return;
+    var r = this.getBoundingClientRect();
+    drawMatchRect(e.clientX - r.left, e.clientY - r.top);
+  });
+  $("matchBox").addEventListener("pointerup", function(e){
+    if(!match || !match.drag) return;
+    var r = this.getBoundingClientRect(), x1 = e.clientX - r.left, y1 = e.clientY - r.top;
+    var box = [Math.min(match.x0, x1), Math.min(match.y0, y1), Math.abs(x1 - match.x0), Math.abs(y1 - match.y0)];
+    var ref = match.ref; endMatch();
+    if(box[2] < 30 || box[3] < 30){ toast("Drag a bigger box around the painting"); return; }
+    runMatch(box, r, ref);
+  });
+  function drawMatchRect(x, y){
+    var el = $("matchRect").style;
+    el.display = "block";
+    el.left = Math.min(match.x0, x) + "px"; el.top = Math.min(match.y0, y) + "px";
+    el.width = Math.abs(x - match.x0) + "px"; el.height = Math.abs(y - match.y0) + "px";
+  }
+
+  function pixels(src, sx, sy, sw, sh){
+    var k = Math.min(1, 200 / Math.max(sw, sh)), c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+    var g = c.getContext("2d");
+    g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    var d = g.getImageData(0, 0, c.width, c.height).data, out = [];
+    for(var i = 0; i < d.length; i += 4) out.push([d[i] / 255, d[i + 1] / 255, d[i + 2] / 255]);
+    return out;
+  }
+  function stats(P){
+    var n = P.length, m = [0, 0, 0], C = 0, ys = [];
+    P.forEach(function(p){
+      var y = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+      m[0] += p[0]; m[1] += p[1]; m[2] += p[2]; ys.push(y);
+      C += Math.sqrt((p[0] - y) * (p[0] - y) + (p[1] - y) * (p[1] - y) + (p[2] - y) * (p[2] - y));
+    });
+    return { m: [m[0] / n, m[1] / n, m[2] / n], ys: ys, C: C / n };
+  }
+  function quantiles(ys){
+    var s = ys.slice().sort(function(a, b){ return a - b; }), out = [];
+    for(var p = 5; p <= 95; p += 5) out.push(s[Math.min(s.length - 1, Math.floor(s.length * p / 100))]);
+    return out;
+  }
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  function runMatch(box, stageRect, ref){
+    var V, R;
+    try{
+      // the box on screen -> video pixels (the video is fitted inside the stage)
+      var vw = video.videoWidth, vh = video.videoHeight, k = Math.min(stageRect.width / vw, stageRect.height / vh);
+      var ox = (stageRect.width - vw * k) / 2, oy = (stageRect.height - vh * k) / 2;
+      var sx = clamp((box[0] - ox) / k, 0, vw), sy = clamp((box[1] - oy) / k, 0, vh);
+      var sw = clamp((box[0] + box[2] - ox) / k, 0, vw) - sx, sh = clamp((box[1] + box[3] - oy) / k, 0, vh) - sy;
+      if(sw < 20 || sh < 20){ toast("Drag the box over the video picture"); return; }
+      V = pixels(video, sx, sy, sw, sh);
+      // the part of the reference image in view in the picture window
+      var img = ref.img, ir = img.getBoundingClientRect(), br = ref.box.getBoundingClientRect();
+      var ks = img.naturalWidth / ir.width;
+      var x0 = Math.max(ir.left, br.left), y0 = Math.max(ir.top, br.top), x1 = Math.min(ir.right, br.right), y1 = Math.min(ir.bottom, br.bottom);
+      if(x1 - x0 < 10 || y1 - y0 < 10){ toast("The picture window isn't showing the image"); return; }
+      R = pixels(img, (x0 - ir.left) * ks, (y0 - ir.top) * ks, (x1 - x0) * ks, (y1 - y0) * ks);
+    }catch(err){
+      toast("Couldn't read the video or the image here (" + err.name + ")"); return;
+    }
+    var sR = stats(R), sV = stats(V);
+    // 1. warmth and tint from the average colour (each channel's ratio, overall level aside)
+    var q = [sR.m[0] / sV.m[0], sR.m[1] / sV.m[1], sR.m[2] / sV.m[2]];
+    var x = q[0] / q[2], w = clamp((x - 1) / (WARM * (x + 1)), -1, 1);
+    var gw = toneGains(w, 0), wantG = q[1] / ((q[0] + q[2]) / 2) * ((gw[0] + gw[2]) / 2);
+    var t = clamp((1 - wantG) / TINT, -1, 1);
+    w = Math.round(w * 100) / 100; t = Math.round(t * 100) / 100;
+    var g = toneGains(w, t);
+    var V1 = V.map(function(p){ return [Math.min(1, p[0] * g[0]), Math.min(1, p[1] * g[1]), Math.min(1, p[2] * g[2])]; });
+    var s1 = stats(V1);
+    // 2. saturation; 3. contrast and brightness (saturation leaves lightness alone)
+    var sat = clamp(sR.C / Math.max(0.005, s1.C), 0.3, 1.5);
+    // Line up lightness from dark to light (5% to 95%) with a straight line y' = a y + b, which
+    // is what contrast c and brightness B do together: a = cB, b = B(1 - c)/2.
+    var qv = quantiles(s1.ys), qr = quantiles(sR.ys), n = qv.length, mx = 0, my = 0, sxy = 0, sxx = 0;
+    for(var i = 0; i < n; i++){ mx += qv[i] / n; my += qr[i] / n; }
+    for(i = 0; i < n; i++){ sxy += (qv[i] - mx) * (qr[i] - my); sxx += (qv[i] - mx) * (qv[i] - mx); }
+    var a = sxx > 1e-6 ? sxy / sxx : 1, b = my - a * mx;
+    var bri = clamp(a + 2 * b, 0.6, 1.5), con = clamp(a / bri, 0.6, 1.5);
+    var S = state.settings;
+    S.warmth = w; S.tint = t;
+    S.saturation = Math.round(sat * 100) / 100; S.contrast = Math.round(con * 100) / 100; S.brightness = Math.round(bri * 100) / 100;
+    Store.set("settings", S); applyPicture();
+    $("pictureModal").classList.add("show");
+    toast("Matched to " + stemOf(ref.name) + ". Fine-tune by eye, or Reset to go back to the recording.", 5000);
+  }
   $("pictureBtn").addEventListener("click", function(){
     applyPicture(); $("pictureModal").classList.toggle("show");
   });
@@ -955,6 +1165,7 @@
   document.addEventListener("keydown", function(e){
     if($("player").hidden || e.target.tagName === "INPUT") return;
     if(BWImages.key(e)) return;
+    if(match){ if(e.key === "Escape"){ endMatch(); $("pictureModal").classList.add("show"); } return; }
     if(document.querySelector(".modal.show")){ if(e.key === "Escape") document.querySelector(".modal.show").classList.remove("show"); return; }
     var k = e.key;
     if(immersive() && k !== " " && k !== "h" && k !== "H") showUI();
@@ -965,6 +1176,7 @@
     else if(k === "m" || k === "M") toggleMute();
     else if(k === "f" || k === "F") toggleFull();
     else if(k === "w" || k === "W") peekPrevious();
+    else if(k === "d" || k === "D") toggleDiag();
     else if(k === "Escape"){ if(state.peek) stopPeek(); else if(document.body.classList.contains("fs")) toggleFull(); }
     else if(k === "c" || k === "C") setImmersive(!immersive());
     else if(k === "i" || k === "I") BWImages.toggleWindow();
