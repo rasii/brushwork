@@ -488,17 +488,18 @@
 
   function saveSession(now){
     var s = state.session;
-    if(!s || !s.key) return;
+    if(!s || !s.key || !video.src || video.readyState < 1) return;
     state.lastSave = Date.now();
+    // read the place now: closing the video unloads it before the saved record comes back
+    var t = video.currentTime, A = state.A;
     Store.getSession(s.key).then(function(saved){
       saved = saved || { key: s.key, name: s.name, source: s.source };
-      var t = video.currentTime;
       // only a real move counts as newer: a paused tab mustn't keep claiming the place
       if(Math.abs(t - (saved.position || 0)) > 0.5 || !saved.posAt){
         saved.position = t; saved.posAt = Date.now();
         pushPos(s.key, t, saved.posAt);
       }
-      if(s.source === "file" && state.A && state.A.samples.canvas.length) saved.analysis = state.A;
+      if(s.source === "file" && A && A.samples.canvas.length) saved.analysis = A;
       Store.putSession(saved);
     });
   }
