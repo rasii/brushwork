@@ -40,9 +40,10 @@ default) until you let go. That works while paused too, and on the PC holding **
 the same. **<** and **>** step the speed down and up.
 
 **Images:** the picture button (or **I**) opens a floating window with the reference photo,
-the finished painting and progress shots. Drag its title bar to move it, its corner to
+the finished painting and progress shots. Drag its title bar to move it, any corner to
 resize it; scroll or pinch to zoom, drag to look around, double-tap to zoom in or back
-out. It remembers where it was and how it was zoomed for each video. The arrows switch
+out. It remembers where it was and how it was zoomed for each video, and stays put by its
+nearest corner when the video goes full screen or back. The arrows switch
 images; the expand button (or **O**) shows one full screen and pauses the video until you
 close it. The camera button (or **G**) saves the current video frame as an image, and the
 **+** adds images from the device. On the PC every image in the video's folder is listed,
@@ -105,7 +106,8 @@ add `"network": false` to `helper/config.json`.
 **Picking up where you left off:** the helper remembers where you were in each video (in
 `helper/positions.json`), so stop on the PC and the iPad starts from there, and the other way
 round. Whichever device moved last wins; a video left paused on one device moves to the newer
-place when you come back to it. This works for every copy of the app that reaches the helper
+place when you come back to it. **Continue watching**, at the top of the list, shows the three
+videos you watched most recently on any device, and each video in the list shows where you were. This works for every copy of the app that reaches the helper
 (not the home-screen app below, which Safari doesn't let talk to it).
 
 **Copying the files over:**

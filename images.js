@@ -143,6 +143,7 @@
         resolve(true);
       };
       img.onerror = function(){ resolve(false); };
+      if(window.BWsetCors) window.BWsetCors(img, url);
       img.src = url;
     });
   };
@@ -153,7 +154,10 @@
   var items = [];          // { name, url, session, saved, id?, grab? }
   var urls = [];           // object URLs to revoke
   var sess = null;
-  var ui = null;           // { open, geo: {x, y, w, h} (fractions of the stage), cur, views: {name: view} }
+  var ui = null;           // { open, geo, cur, views: {name: view} }
+  // geo: size in px, and the distance in px from the nearest side each way (ax "l"/"r", ay "t"/"b"),
+  // so the window stays put by its corner when the video area changes size (full screen).
+  // Older saves (and the default) are fractions of the video area: {x, y, w, h}, converted on first use.
   var cur = -1, fullCur = -1, fullWasPlaying = false;
   var winView, fullView, saveTimer = null;
   var IMG_RE = /\.(jpe?g|png|webp|gif|heic)$/i;
@@ -189,6 +193,9 @@
     });
     $("imgFullRemove").addEventListener("click", removeCurrentFull);
     bindWindowDrag();
+    // re-place whenever the video area changes size (full screen, hiding the controls, rotating),
+    // once the layout has settled
+    if(window.ResizeObserver) new ResizeObserver(function(){ if(ui && ui.open) place(); }).observe($("stage"));
     window.addEventListener("resize", function(){ if(ui && ui.open) place(); });
   }
 
@@ -368,10 +375,23 @@
   function step(d){ if(items.length) show(cur + d); }
 
   function stageRect(){ return $("stage").getBoundingClientRect(); }
+  var MINW = 220, MINH = 160;
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  // store a window rectangle (px, relative to the video area) by its nearest corner
+  function setGeo(l, t, W, Hh){
+    var r = stageRect();
+    ui.geo = { w: W, h: Hh,
+               ax: l + W / 2 < r.width / 2 ? "l" : "r", x: 0, ay: t + Hh / 2 < r.height / 2 ? "t" : "b", y: 0 };
+    ui.geo.x = Math.max(0, ui.geo.ax === "l" ? l : r.width - l - W);
+    ui.geo.y = Math.max(0, ui.geo.ay === "t" ? t : r.height - t - Hh);
+  }
   function place(){
     var r = stageRect(), g = ui.geo, w = $("imgWin");
-    var W = Math.max(220, Math.min(r.width, g.w * r.width)), Hh = Math.max(160, Math.min(r.height, g.h * r.height));
-    var x = Math.max(0, Math.min(r.width - W, g.x * r.width)), y = Math.max(0, Math.min(r.height - Hh, g.y * r.height));
+    if(!r.width || !r.height) return;
+    if(!g.ax){ setGeo(g.x * r.width, g.y * r.height, g.w * r.width, g.h * r.height); g = ui.geo; }   // older save
+    var W = clamp(g.w, Math.min(MINW, r.width), r.width), Hh = clamp(g.h, Math.min(MINH, r.height), r.height);
+    var x = clamp(g.ax === "l" ? g.x : r.width - W - g.x, 0, r.width - W);
+    var y = clamp(g.ay === "t" ? g.y : r.height - Hh - g.y, 0, r.height - Hh);
     w.style.left = x + "px"; w.style.top = y + "px"; w.style.width = W + "px"; w.style.height = Hh + "px";
   }
   function bindWindowDrag(){
@@ -386,21 +406,25 @@
     }
     function move(e){
       if(!drag || e.pointerId !== drag.id) return;
-      var r = stageRect(), dx = e.clientX - drag.x, dy = e.clientY - drag.y, g = ui.geo;
-      if(drag.mode === "move"){
-        g.x = Math.max(0, Math.min(r.width - drag.w, drag.l + dx)) / r.width;
-        g.y = Math.max(0, Math.min(r.height - drag.h, drag.t + dy)) / r.height;
+      var r = stageRect(), dx = e.clientX - drag.x, dy = e.clientY - drag.y, m = drag.mode;
+      var l = drag.l, t = drag.t, W = drag.w, Hh = drag.h;
+      if(m === "move"){
+        l = clamp(l + dx, 0, r.width - W); t = clamp(t + dy, 0, r.height - Hh);
       } else {
-        g.w = Math.max(220, Math.min(r.width - drag.l, drag.w + dx)) / r.width;
-        g.h = Math.max(160, Math.min(r.height - drag.t, drag.h + dy)) / r.height;
+        // m is the corner being dragged: "nw", "ne", "sw" or "se"; the opposite corner stays put
+        if(m[1] === "e") W = clamp(W + dx, MINW, r.width - l);
+        else { var nl = clamp(l + dx, 0, l + W - MINW); W += l - nl; l = nl; }
+        if(m[0] === "s") Hh = clamp(Hh + dy, MINH, r.height - t);
+        else { var nt = clamp(t + dy, 0, t + Hh - MINH); Hh += t - nt; t = nt; }
       }
+      setGeo(l, t, W, Hh);
       place();
     }
     function end(e){ if(drag && e.pointerId === drag.id){ drag = null; saveUI(); } }
-    var bar = $("imgWinBar"), rs = $("imgWinResize");
+    var bar = $("imgWinBar"), grips = Array.prototype.slice.call($("imgWin").querySelectorAll(".imgwin-resize"));
     bar.addEventListener("pointerdown", function(e){ if(!e.target.closest("button")) start(e, "move"); });
-    rs.addEventListener("pointerdown", function(e){ start(e, "size"); });
-    [bar, rs].forEach(function(el){
+    grips.forEach(function(g){ g.addEventListener("pointerdown", function(e){ start(e, g.dataset.corner); }); });
+    [bar].concat(grips).forEach(function(el){
       el.addEventListener("pointermove", move);
       el.addEventListener("pointerup", end);
       el.addEventListener("pointercancel", end);

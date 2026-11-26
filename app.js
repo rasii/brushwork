@@ -79,6 +79,14 @@
   }
 
   function helperURL(path){ return state.helper + path; }
+  // The hosted app (GitHub Pages) plays videos and shows images from the helper at another
+  // address. Ask for them with CORS (the helper allows it), or the browser won't let Match and
+  // the camera button read their pixels.
+  function setCors(el, url){
+    var other = /^https?:/i.test(url) && url.indexOf(location.origin + "/") !== 0;
+    if(other) el.crossOrigin = "anonymous"; else el.removeAttribute("crossorigin");
+  }
+  self.BWsetCors = setCors;
 
   // Where you were in each video is also kept by the helper, so the PC and the iPad pick up
   // from each other. The newest save wins.
@@ -87,11 +95,12 @@
     return withTimeout(fetchJSON(helperURL("/api/position?key=" + encodeURIComponent(key))), 1500)
       .then(function(j){ return j && j.at ? j : null; }).catch(function(){ return null; });
   }
-  function pushPos(key, pos, at){
+  function pushPos(s, pos, at){
     if(state.helper === null) return;
     try{
       fetch(helperURL("/api/position"), { method: "POST", keepalive: true,     // plain text: no preflight
-        body: JSON.stringify({ key: key, pos: pos, at: at }) }).catch(function(){});
+        body: JSON.stringify({ key: s.key, pos: pos, at: at, id: s.source === "helper" ? s.id : undefined,
+                               dur: isFinite(video.duration) ? video.duration : undefined }) }).catch(function(){});
     }catch(e){}
   }
   // coming back to a paused video: move to where another device got to meanwhile
@@ -133,7 +142,7 @@
     $("helperPill").classList.toggle("on", state.helper !== null);
     $("noHelperHint").hidden = state.helper !== null || /iPad|iPhone/.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
     renderRecent();
-    if(state.helper === null){ $("helperSection").hidden = true; return; }
+    if(state.helper === null){ $("helperSection").hidden = true; $("continueSection").hidden = true; return; }
     fetchJSON(helperURL("/api/library")).then(function(lib){
       $("helperSection").hidden = false;
       var box = $("helperList"); box.innerHTML = "";
@@ -141,6 +150,7 @@
         box.innerHTML = '<p class="hint">No video folders set yet — add them to <b>helper/config.json</b>.</p>';
         return;
       }
+      renderContinue(lib.videos);
       var lastFolder = null;
       lib.videos.forEach(function(v){
         if(v.folder !== lastFolder){
@@ -151,7 +161,7 @@
         var row = document.createElement("div"); row.className = "item";
         row.innerHTML = '<span class="name"></span><span class="meta"></span>';
         row.querySelector(".name").textContent = v.name;
-        row.querySelector(".meta").innerHTML = badges(v);
+        row.querySelector(".meta").innerHTML = (v.last && v.last.pos > 1 ? '<span class="pos">at ' + fmt(v.last.pos) + '</span>' : "") + badges(v);
         row.addEventListener("click", function(){ openHelperVideo(v); });
         box.appendChild(row);
       });
@@ -160,7 +170,36 @@
         clearTimeout(renderLibrary.t);
         renderLibrary.t = setTimeout(function(){ if(!$("library").hidden) renderLibrary(); }, 4000);
       }
-    }).catch(function(){ $("helperSection").hidden = true; });
+    }).catch(function(){ $("helperSection").hidden = true; $("continueSection").hidden = true; });
+  }
+
+  // the videos you watched most recently, on any device (the helper keeps where you were)
+  function renderContinue(videos){
+    var list = videos.filter(function(v){
+      var l = v.last;
+      return l && l.pos > 1 && !(l.dur && l.pos > l.dur - 60);     // not ones watched to the end
+    }).sort(function(a, b){ return b.last.at - a.last.at; }).slice(0, 3);
+    $("continueSection").hidden = !list.length;
+    var box = $("continueList"); box.innerHTML = "";
+    list.forEach(function(v){
+      var row = document.createElement("div"); row.className = "item";
+      row.innerHTML = '<span class="name"><span class="where"></span></span><span class="meta"><span class="pos"></span></span>';
+      var folder = v.folder.replace(/\\/g, "/").split("/").pop();
+      row.querySelector(".name").insertBefore(document.createTextNode(stemOf(v.name)), row.querySelector(".where"));
+      row.querySelector(".where").textContent = folder;
+      row.querySelector(".pos").textContent = "at " + fmt(v.last.pos) + (v.last.dur ? " of " + fmt(v.last.dur) : "") + " · " + ago(v.last.at);
+      row.addEventListener("click", function(){ openHelperVideo(v); });
+      box.appendChild(row);
+    });
+  }
+  function ago(t){
+    var m = Math.round((Date.now() - t) / 60000);
+    if(m < 2) return "just now";
+    if(m < 60) return m + " min ago";
+    var h = Math.round(m / 60);
+    if(h < 24) return h + " h ago";
+    var d = Math.round(h / 24);
+    return d === 1 ? "yesterday" : d + " days ago";
   }
 
   function badges(v){
@@ -267,6 +306,7 @@
     $("backBtn").hidden = false; $("statsBtn").hidden = false; $("settingsBtn").hidden = false; $("pictureBtn").hidden = false;
     $("title").textContent = stemOf(sess.name);
     $("subtitle").textContent = sess.source === "helper" ? "" : "";
+    setCors(video, src);
     video.src = src;
     video.muted = state.userMuted;
     video.addEventListener("loadedmetadata", function once(){
@@ -343,7 +383,8 @@
   function swapToPrepped(){
     state.prepped = true;
     var t = video.currentTime, playing = !video.paused;
-    video.src = helperURL("/video?id=" + state.session.id + "&v=prepped&t=" + Date.now());
+    var u = helperURL("/video?id=" + state.session.id + "&v=prepped&t=" + Date.now());
+    setCors(video, u); video.src = u;
     video.addEventListener("loadedmetadata", function once(){
       video.removeEventListener("loadedmetadata", once);
       video.currentTime = t;
@@ -497,7 +538,7 @@
       // only a real move counts as newer: a paused tab mustn't keep claiming the place
       if(Math.abs(t - (saved.position || 0)) > 0.5 || !saved.posAt){
         saved.position = t; saved.posAt = Date.now();
-        pushPos(s.key, t, saved.posAt);
+        pushPos(s, t, saved.posAt);
       }
       if(s.source === "file" && A && A.samples.canvas.length) saved.analysis = A;
       Store.putSession(saved);

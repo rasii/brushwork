@@ -587,17 +587,34 @@ class Positions:
         with self.lock:
             return self.data.get(key)
 
-    def put(self, key, pos, at):
+    def put(self, key, pos, at, vid=None, dur=None):
         with self.lock:
             old = self.data.get(key)
             if old and old.get("at", 0) >= at:
                 return old
-            self.data[key] = {"pos": round(pos, 2), "at": at}
+            e = {"pos": round(pos, 2), "at": at}
+            vid = vid or (old or {}).get("id")          # the library video it belongs to, for the list
+            if vid:
+                e["id"] = vid
+            dur = dur or (old or {}).get("dur")
+            if dur:
+                e["dur"] = round(dur, 2)
+            self.data[key] = e
             tmp = POSITIONS + ".tmp"
             with open(tmp, "w") as fh:
                 json.dump(self.data, fh)
             os.replace(tmp, POSITIONS)
             return self.data[key]
+
+    def by_id(self):
+        """The newest saved place for each library video."""
+        out = {}
+        with self.lock:
+            for e in self.data.values():
+                i = e.get("id")
+                if i and e["at"] > out.get(i, {}).get("at", 0):
+                    out[i] = e
+        return out
 
 
 POS = Positions()
@@ -627,6 +644,9 @@ class Library:
                         i = vid_id(p)
                         self.paths[i] = p
                         items.append(self.status(i))
+        last = POS.by_id()
+        for v in items:
+            v["last"] = last.get(v["id"])     # where you were and when, from any device
         return {"folders": cfg["folders"], "videos": items}
 
     def status(self, i):
@@ -698,6 +718,15 @@ def debug(msg):
             fh.write(f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} [{threading.get_ident() % 10000:4d}] {msg}\n")
 
 
+class Server(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        # the browser dropping a connection it kept open for later (skipping around, changing
+        # videos, closing the tab) is normal: don't print a traceback for it
+        if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -737,9 +766,11 @@ class Handler(BaseHTTPRequestHandler):
                 n = int(self.headers.get("Content-Length") or 0)
                 b = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
                 key, pos, at = str(b["key"])[:300], float(b["pos"]), float(b["at"])
+                vid = b.get("id") if b.get("id") in LIB.paths else None
+                dur = float(b["dur"]) if b.get("dur") else None
             except Exception:
                 return self.send_json({"error": "bad position"}, 400)
-            return self.send_json(POS.put(key, pos, at))
+            return self.send_json(POS.put(key, pos, at, vid, dur))
         self.send_json({"error": "not found"}, 404)
 
     def do_GET(self):
@@ -851,7 +882,7 @@ def serve(open_browser=False):
     url = f"http://127.0.0.1:{port}/"
     host = "0.0.0.0" if cfg.get("network", True) else "127.0.0.1"
     try:
-        srv = ThreadingHTTPServer((host, port), Handler)
+        srv = Server((host, port), Handler)
     except OSError:
         # most likely the helper is already running in another window
         print(f"Port {port} is already in use - the helper is probably already running. Opening {url}")

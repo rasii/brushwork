@@ -49,6 +49,11 @@
     <input type="file" id="fileInput" multiple accept="video/*,image/*,.json,application/json,.mp4,.mov,.m4v,.jpg,.jpeg,.png" hidden>
   </section>
 
+  <section id="continueSection" hidden>
+    <h2>Continue watching</h2>
+    <div id="continueList" class="list"></div>
+  </section>
+
   <section id="helperSection" hidden>
     <h2>On this PC</h2>
     <p class="hint">Videos in your folders. Opening one that isn't ready asks before processing
@@ -97,7 +102,10 @@
         <p>No images for this video yet.</p>
         <p><button class="text-btn" id="imgEmptyAdd">Add images…</button> <button class="text-btn" id="imgEmptyGrab">Save this frame</button></p>
       </div>
-      <div class="imgwin-resize" id="imgWinResize" title="Drag to resize"></div>
+      <div class="imgwin-resize nw" data-corner="nw" title="Drag to resize"></div>
+      <div class="imgwin-resize ne" data-corner="ne" title="Drag to resize"></div>
+      <div class="imgwin-resize sw" data-corner="sw" title="Drag to resize"></div>
+      <div class="imgwin-resize se" data-corner="se" title="Drag to resize"></div>
     </div>
   </div>
 
